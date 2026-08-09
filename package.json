@@ -1,0 +1,43 @@
+{
+  "name": "redcolumn",
+  "productName": "RedColumn",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Free open-source PDF viewer and markup desktop app.",
+  "license": "MIT",
+  "author": "RedColumn contributors",
+  "type": "module",
+  "main": "dist-electron/main/index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.node.json && vite build && electron-builder",
+    "build:dir": "vite build && electron-builder --dir",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "postinstall": "node ./scripts/ensure-pdfium.mjs"
+  },
+  "dependencies": {
+    "pdfium-native": "^0.9.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.16",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^3.2.4"
+  },
+  "allowScripts": {
+    "electron@37.10.3": true,
+    "esbuild@0.25.12": true,
+    "pdfium-native@0.9.1": true,
+    "electron-winstaller@5.4.0": true
+  }
+}

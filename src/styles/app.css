@@ -1,0 +1,270 @@
+:root {
+  color-scheme: light;
+  --bg: #eceff1;
+  --panel: #f7f8fa;
+  --border: #cfd6dd;
+  --text: #1c2430;
+  --muted: #5b6775;
+  --accent: #b42318;
+  --accent-hover: #8f1b13;
+  --page-shadow: 0 1px 4px rgba(28, 36, 48, 0.18);
+  --font: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+}
+
+.toolbar,
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  border-color: var(--border);
+  border-style: solid;
+}
+
+.toolbar {
+  border-bottom-width: 1px;
+  flex-wrap: wrap;
+}
+
+.status-bar {
+  border-top-width: 1px;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  margin-right: 0.5rem;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.toolbar button,
+.dialog button {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0.3rem 0.65rem;
+  cursor: pointer;
+}
+
+.toolbar button:hover,
+.dialog button:hover {
+  border-color: #aeb7c2;
+}
+
+.toolbar button.primary,
+.dialog button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.toolbar button.primary:hover,
+.dialog button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.toolbar button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #fff5f4;
+}
+
+.toolbar input[type='number'] {
+  width: 4.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.28rem 0.4rem;
+}
+
+.viewport-shell {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, #e8ecf0 0%, #dfe5eb 100%);
+}
+
+.empty-state {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 0.75rem;
+  color: var(--muted);
+  padding: 2rem;
+}
+
+.empty-state h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.5rem;
+}
+
+.empty-state p {
+  margin: 0;
+  max-width: 28rem;
+}
+
+.document-viewport {
+  height: 100%;
+  overflow: auto;
+}
+
+.document-stage {
+  margin: 0 auto;
+  padding: 1rem 0 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.page-slot {
+  position: relative;
+  background: #fff;
+  box-shadow: var(--page-shadow);
+  overflow: hidden;
+}
+
+.page-slot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.page-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-content: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  background: repeating-linear-gradient(
+    -45deg,
+    #fafbfc,
+    #fafbfc 8px,
+    #f3f5f7 8px,
+    #f3f5f7 16px
+  );
+}
+
+.drawing-viewport {
+  height: 100%;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.drawing-viewport.panning {
+  cursor: grabbing;
+}
+
+.drawing-stage {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.drawing-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 28, 36, 0.45);
+  display: grid;
+  place-content: center;
+  z-index: 20;
+}
+
+.dialog {
+  width: min(22rem, calc(100vw - 2rem));
+  background: #fff;
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.dialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.dialog input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.45rem 0.55rem;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.error-banner {
+  position: absolute;
+  left: 50%;
+  top: 0.75rem;
+  transform: translateX(-50%);
+  background: #fff5f4;
+  color: var(--accent);
+  border: 1px solid #f0c2be;
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  z-index: 5;
+  max-width: min(36rem, calc(100% - 2rem));
+}

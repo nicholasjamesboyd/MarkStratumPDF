@@ -1,0 +1,60 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.redcolumn.pdf",
+  "productName": "RedColumn",
+  "asar": true,
+  "npmRebuild": false,
+  "directories": {
+    "output": "release/${version}"
+  },
+  "files": [
+    "dist-electron",
+    "dist",
+    "package.json"
+  ],
+  "asarUnpack": [
+    "**/node_modules/pdfium-native/**"
+  ],
+  "mac": {
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "category": "public.app-category.productivity",
+    "target": [
+      "dmg",
+      "zip"
+    ]
+  },
+  "win": {
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "linux": {
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "category": "Office",
+    "target": [
+      "AppImage",
+      "deb"
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  },
+  "fileAssociations": [
+    {
+      "ext": "pdf",
+      "name": "PDF Document",
+      "role": "Viewer"
+    }
+  ]
+}
