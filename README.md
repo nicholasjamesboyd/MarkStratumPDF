@@ -2,6 +2,8 @@
 
 Free, open-source PDF viewer (and future markup) desktop app. MIT licensed.
 
+Repository: https://github.com/nicholasjamesboyd/RedColumnPDF
+
 RedColumn aims at document and drawing workflows: efficient multi-page viewing, pan/zoom for large sheets, and later markups, measure, stamps, and PDF editing. Compatibility with other PDF programs is a design goal.
 
 ## Current status (MVP)
