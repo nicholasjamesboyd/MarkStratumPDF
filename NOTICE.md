@@ -1,10 +1,10 @@
 # Third-party notices
 
-RedColumn is MIT-licensed application code. It depends on open-source libraries, including:
+MarkStratum is MIT-licensed application code. It depends on open-source libraries, including:
 
 ## PDFium
 
-RedColumn renders PDFs with [PDFium](https://pdfium.googlesource.com/pdfium/), accessed through [pdfium-native](https://github.com/xonaman/nodejs-pdfium-native) (MIT).
+MarkStratum renders PDFs with [PDFium](https://pdfium.googlesource.com/pdfium/), accessed through [pdfium-native](https://github.com/xonaman/nodejs-pdfium-native) (MIT).
 
 PDFium is distributed under a BSD-style license by the PDFium Authors / Google. See the PDFium project for the full license text.
 

@@ -8,7 +8,7 @@ import {
   type ViewMode,
 } from '../../shared/ipc'
 
-export type RedColumnApi = {
+export type MarkStratumApi = {
   openPath: (filePath: string, password?: string) => Promise<OpenDocumentResult>
   openDialog: () => Promise<OpenDocumentResult | null>
   closeDocument: () => Promise<void>
@@ -33,7 +33,7 @@ function subscribe<T extends unknown[]>(
   }
 }
 
-const api: RedColumnApi = {
+const api: MarkStratumApi = {
   openPath: (filePath, password) =>
     ipcRenderer.invoke(IpcChannels.openPath, filePath, password),
   openDialog: () => ipcRenderer.invoke(IpcChannels.openDialog),
@@ -47,4 +47,4 @@ const api: RedColumnApi = {
   onOpenPath: (handler) => subscribe<[string]>('app:open-path', handler),
 }
 
-contextBridge.exposeInMainWorld('redColumn', api)
+contextBridge.exposeInMainWorld('markStratum', api)

@@ -1,10 +1,10 @@
-# RedColumn
+# MarkStratum
 
 Free, open-source PDF viewer (and future markup) desktop app. MIT licensed.
 
-Repository: https://github.com/nicholasjamesboyd/RedColumnPDF
+Repository: https://github.com/nicholasjamesboyd/MarkStratumPDF
 
-RedColumn aims at document and drawing workflows: efficient multi-page viewing, pan/zoom for large sheets, and later markups, measure, stamps, and PDF editing. Compatibility with other PDF programs is a design goal.
+MarkStratum aims at document and drawing workflows: efficient multi-page viewing, pan/zoom for large sheets, and later markups, measure, stamps, and PDF editing. Compatibility with other PDF programs is a design goal.
 
 ## Current status (MVP)
 
@@ -46,7 +46,7 @@ Useful scripts:
 ## Architecture
 
 - **Electron main:** owns PDFium (`pdfium-native`), document session, LRU page cache, menus, file dialogs
-- **Preload:** exposes a narrow `window.redColumn` API
+- **Preload:** exposes a narrow `window.markStratum` API
 - **Renderer (React):** viewport, toolbar, status bar
 
 PDF access goes through a `PdfEngine` interface so the renderer never loads native code, and the engine can later grow tiled rendering without rewriting the UI.

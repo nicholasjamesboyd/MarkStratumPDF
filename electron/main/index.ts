@@ -26,7 +26,7 @@ if (process.platform === 'win32' && os.release().startsWith('6.1')) {
 }
 
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.redcolumn.pdf')
+  app.setAppUserModelId('com.markstratum.pdf')
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -42,7 +42,7 @@ let pendingOpenPath: string | undefined
 
 async function createWindow() {
   win = new BrowserWindow({
-    title: 'RedColumn',
+    title: 'MarkStratum',
     width: 1280,
     height: 840,
     minWidth: 800,
@@ -88,28 +88,32 @@ function registerIpc() {
     },
   )
 
-  ipcMain.handle(IpcChannels.openDialog, async (): Promise<OpenDocumentResult | null> => {
-    const result = await dialog.showOpenDialog(win!, {
-      title: 'Open PDF',
-      properties: ['openFile'],
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-    })
-    if (result.canceled || result.filePaths.length === 0) {
-      return null
-    }
-    return session.open(result.filePaths[0])
-  })
+  ipcMain.handle(
+    IpcChannels.openDialog,
+    async (event): Promise<OpenDocumentResult | null> => {
+      const parent =
+        BrowserWindow.fromWebContents(event.sender) ?? win ?? BrowserWindow.getFocusedWindow()
+      if (!parent) {
+        return { ok: false, error: 'No window available for the open dialog.' }
+      }
+      const result = await dialog.showOpenDialog(parent, {
+        title: 'Open PDF',
+        properties: ['openFile'],
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (result.canceled || result.filePaths.length === 0) {
+        return null
+      }
+      return session.open(result.filePaths[0])
+    },
+  )
 
   ipcMain.handle(IpcChannels.close, async () => {
     await session.close()
   })
 
   ipcMain.handle(IpcChannels.renderPage, async (_event, req: RenderPageRequest) => {
-    const rendered = await session.renderPage(req)
-    return {
-      ...rendered,
-      data: Buffer.from(rendered.data),
-    }
+    return session.renderPage(req)
   })
 }
 

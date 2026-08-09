@@ -4,28 +4,40 @@ import {
   type PDFiumDocument,
   type PDFiumPage,
 } from 'pdfium-native'
-import type { PageInfo, RenderedPage, SizePts } from '../../../shared/ipc'
+import type { PageInfo, SizePts } from '../../../shared/ipc'
 
 export type PdfDocumentHandle = {
   id: string
   path: string
 }
 
-export type RenderPageRequest = {
+export type EngineRenderRequest = {
   pageIndex: number
   scale: number
   rotation?: 0 | 1 | 2 | 3
   requestId: string
 }
 
+export type EngineRenderedPage = {
+  pageIndex: number
+  scale: number
+  width: number
+  height: number
+  mimeType: 'image/jpeg'
+  data: Buffer
+  requestId: string
+}
+
 const MAX_RENDER_EDGE_PX = 4096
+const DEFAULT_PAGE_WIDTH = 612
+const DEFAULT_PAGE_HEIGHT = 792
 
 export interface PdfEngine {
   open(path: string, password?: string): Promise<PdfDocumentHandle>
   getPageCount(doc: PdfDocumentHandle): number
   getPageSize(doc: PdfDocumentHandle, pageIndex: number): Promise<SizePts>
   getPages(doc: PdfDocumentHandle): Promise<PageInfo[]>
-  renderPage(doc: PdfDocumentHandle, req: RenderPageRequest): Promise<RenderedPage>
+  renderPage(doc: PdfDocumentHandle, req: EngineRenderRequest): Promise<EngineRenderedPage>
   close(doc: PdfDocumentHandle): Promise<void>
 }
 
@@ -80,27 +92,37 @@ export class PdfiumEngine implements PdfEngine {
 
   async getPages(doc: PdfDocumentHandle): Promise<PageInfo[]> {
     const native = this.requireDoc(doc).native
-    const pages: PageInfo[] = []
-    for (let index = 0; index < native.pageCount; index += 1) {
-      const page = await native.getPage(index)
-      try {
-        pages.push({
-          index,
-          width: page.width,
-          height: page.height,
-          rotation: normalizeRotation(page.rotation),
-        })
-      } finally {
-        page.close()
-      }
+    const pageCount = native.pageCount
+    if (pageCount <= 0) {
+      return []
     }
-    return pages
+
+    // Fast open: probe the first page, then reuse its size for placeholders.
+    // Exact per-page sizes can be refined later without blocking the first paint.
+    const first = await native.getPage(0)
+    let width = DEFAULT_PAGE_WIDTH
+    let height = DEFAULT_PAGE_HEIGHT
+    let rotation: 0 | 1 | 2 | 3 = 0
+    try {
+      width = first.width || DEFAULT_PAGE_WIDTH
+      height = first.height || DEFAULT_PAGE_HEIGHT
+      rotation = normalizeRotation(first.rotation)
+    } finally {
+      first.close()
+    }
+
+    return Array.from({ length: pageCount }, (_, index) => ({
+      index,
+      width,
+      height,
+      rotation: index === 0 ? rotation : 0,
+    }))
   }
 
   async renderPage(
     doc: PdfDocumentHandle,
-    req: RenderPageRequest,
-  ): Promise<RenderedPage> {
+    req: EngineRenderRequest,
+  ): Promise<EngineRenderedPage> {
     const page = await this.requireDoc(doc).native.getPage(req.pageIndex)
     try {
       const scale = clampScale(req.scale, page)
@@ -118,7 +140,7 @@ export class PdfiumEngine implements PdfEngine {
         width,
         height,
         mimeType: 'image/jpeg',
-        data: new Uint8Array(buffer),
+        data: Buffer.from(buffer),
         requestId: req.requestId,
       }
     } finally {
@@ -145,8 +167,11 @@ export class PdfiumEngine implements PdfEngine {
 }
 
 function normalizeRotation(value: number): 0 | 1 | 2 | 3 {
-  const mod = ((value % 4) + 4) % 4
-  return mod as 0 | 1 | 2 | 3
+  const mod = ((Number(value) % 4) + 4) % 4
+  if (mod === 1 || mod === 2 || mod === 3) {
+    return mod
+  }
+  return 0
 }
 
 function clampScale(scale: number, page: PDFiumPage): number {

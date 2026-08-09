@@ -10,7 +10,7 @@ function writeMinimalPdf(filePath: string) {
 2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj
 3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj
 4 0 obj<< /Length 44 >>stream
-BT /F1 24 Tf 72 72 Td (RedColumn) Tj ET
+BT /F1 24 Tf 72 72 Td (MarkStratum) Tj ET
 endstream
 endobj
 5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
@@ -32,7 +32,7 @@ startxref
 
 describe('PdfiumEngine smoke', () => {
   it('opens and renders a page', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'redcolumn-'))
+    const dir = mkdtempSync(join(tmpdir(), 'markstratum-'))
     const filePath = join(dir, 'sample.pdf')
     writeMinimalPdf(filePath)
 
@@ -50,6 +50,7 @@ describe('PdfiumEngine smoke', () => {
     })
     expect(rendered.data.byteLength).toBeGreaterThan(100)
     expect(rendered.mimeType).toBe('image/jpeg')
+    expect(Buffer.isBuffer(rendered.data)).toBe(true)
 
     await engine.close(doc)
   })

@@ -20,6 +20,7 @@ type PdfViewportProps = {
   onPageIndexChange: (pageIndex: number) => void
   onScaleChange: (scale: number) => void
   onOpenFilePath: (filePath: string) => void
+  onRenderError: (message: string) => void
   renderPageToUrl: (req: {
     pageIndex: number
     scale: number
@@ -43,6 +44,7 @@ export function PdfViewport({
   onPageIndexChange,
   onScaleChange,
   onOpenFilePath,
+  onRenderError,
   renderPageToUrl,
   viewportWidth,
 }: PdfViewportProps) {
@@ -56,6 +58,7 @@ export function PdfViewport({
   const panStart = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null)
   const requestSerial = useRef(0)
   const ignoreScrollSync = useRef(false)
+  const documentPath = document?.path ?? null
 
   useEffect(() => {
     imagesRef.current = images
@@ -67,8 +70,8 @@ export function PdfViewport({
     }
     let y = 0
     return document.pages.map((page) => {
-      const width = page.width * scale
-      const height = page.height * scale
+      const width = Math.max(1, page.width * scale)
+      const height = Math.max(1, page.height * scale)
       const layout = { index: page.index, width, height, y }
       y += height + PAGE_GAP
       return layout
@@ -80,8 +83,8 @@ export function PdfViewport({
     : 0
 
   const requestPages = useCallback(
-    async (indices: number[]) => {
-      if (!document) {
+    async (indices: number[], pathAtRequest: string | null) => {
+      if (!document || !pathAtRequest || document.path !== pathAtRequest) {
         return
       }
       const unique = [...new Set(indices)].filter(
@@ -100,28 +103,36 @@ export function PdfViewport({
               scale,
               requestId,
             })
+            if (documentPath !== pathAtRequest) {
+              return
+            }
             setImages((prev) => ({
               ...prev,
               [index]: rendered,
             }))
-          } catch {
-            // Ignore cancelled/stale render failures during rapid zoom.
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            onRenderError(`Could not render page ${index + 1}: ${message}`)
           }
         }),
       )
     },
-    [document, renderPageToUrl, scale],
+    [document, documentPath, onRenderError, renderPageToUrl, scale],
   )
 
   useEffect(() => {
     setImages({})
+    imagesRef.current = {}
     setVisiblePages([0])
     setPan({ x: 40, y: 40 })
-  }, [document?.path])
+  }, [documentPath])
 
   useEffect(() => {
-    void requestPages(expandAround(visiblePages, document?.pageCount ?? 0))
-  }, [document?.pageCount, requestPages, scale, visiblePages])
+    if (!documentPath) {
+      return
+    }
+    void requestPages(expandAround(visiblePages, document?.pageCount ?? 0), documentPath)
+  }, [document?.pageCount, documentPath, requestPages, scale, visiblePages])
 
   useEffect(() => {
     if (viewMode !== 'document' || !scrollRef.current || !pageLayouts[pageIndex]) {
@@ -184,7 +195,7 @@ export function PdfViewport({
     if (!file.name.toLowerCase().endsWith('.pdf')) {
       return
     }
-    const filePath = window.redColumn.getPathForFile(file)
+    const filePath = window.markStratum.getPathForFile(file)
     if (filePath) {
       onOpenFilePath(filePath)
     }
@@ -280,8 +291,12 @@ export function PdfViewport({
             className="drawing-stage"
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px)`,
-              width: Math.max(...pageLayouts.map((p) => p.width), viewportWidth),
-              height: totalHeight,
+              width: Math.max(
+                viewportWidth,
+                ...pageLayouts.map((page) => page.width),
+                1,
+              ),
+              height: Math.max(totalHeight, 1),
             }}
           >
             <div className="drawing-pages">
@@ -302,8 +317,9 @@ export function PdfViewport({
   }
 
   const stageWidth = Math.max(
-    ...pageLayouts.map((page) => page.width),
     Math.min(viewportWidth - 32, 800),
+    ...pageLayouts.map((page) => page.width),
+    1,
   )
 
   return (

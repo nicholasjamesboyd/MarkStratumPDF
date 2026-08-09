@@ -7,7 +7,7 @@ import type {
 } from '../../shared/ipc'
 
 export function useDocumentSession() {
-  const [document, setDocument] = useState<DocumentInfo | null>(null)
+  const [pdfDocument, setPdfDocument] = useState<DocumentInfo | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [passwordPromptPath, setPasswordPromptPath] = useState<string | null>(null)
@@ -24,7 +24,7 @@ export function useDocumentSession() {
     (result: OpenDocumentResult) => {
       if (result.ok) {
         revokeAllUrls()
-        setDocument(result.document)
+        setPdfDocument(result.document)
         setPasswordPromptPath(null)
         setError(null)
         return
@@ -46,7 +46,7 @@ export function useDocumentSession() {
       setBusy(true)
       setError(null)
       try {
-        const result = await window.redColumn.openPath(filePath, password)
+        const result = await window.markStratum.openPath(filePath, password)
         applyOpenResult(result)
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
@@ -61,7 +61,7 @@ export function useDocumentSession() {
     setBusy(true)
     setError(null)
     try {
-      const result = await window.redColumn.openDialog()
+      const result = await window.markStratum.openDialog()
       if (!result) {
         return
       }
@@ -84,9 +84,9 @@ export function useDocumentSession() {
   )
 
   const closeDocument = useCallback(async () => {
-    await window.redColumn.closeDocument()
+    await window.markStratum.closeDocument()
     revokeAllUrls()
-    setDocument(null)
+    setPdfDocument(null)
     setError(null)
   }, [revokeAllUrls])
 
@@ -96,15 +96,13 @@ export function useDocumentSession() {
     height: number
     scale: number
   }> => {
-    const rendered: RenderedPage = await window.redColumn.renderPage(req)
+    const rendered: RenderedPage = await window.markStratum.renderPage(req)
+    if (!rendered.dataBase64) {
+      throw new Error('Render returned empty image data')
+    }
+    const bytes = base64ToUint8Array(rendered.dataBase64)
     const cacheKey = `${rendered.pageIndex}:${Math.round(rendered.scale * 1000)}`
-    const source =
-      rendered.data instanceof Uint8Array
-        ? rendered.data
-        : new Uint8Array(rendered.data as ArrayLike<number>)
-    const bytes = new Uint8Array(source.byteLength)
-    bytes.set(source)
-    const blob = new Blob([bytes], { type: rendered.mimeType })
+    const blob = new Blob([Uint8Array.from(bytes)], { type: rendered.mimeType })
     const url = URL.createObjectURL(blob)
     const previous = objectUrls.current.get(cacheKey)
     if (previous) {
@@ -126,7 +124,7 @@ export function useDocumentSession() {
   }, [revokeAllUrls])
 
   return {
-    document,
+    document: pdfDocument,
     busy,
     error,
     setError,
@@ -138,4 +136,13 @@ export function useDocumentSession() {
     closeDocument,
     renderPageToUrl,
   }
+}
+
+function base64ToUint8Array(value: string): Uint8Array {
+  const binary = atob(value)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
 }

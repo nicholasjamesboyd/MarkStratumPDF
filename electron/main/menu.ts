@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, Menu, dialog, type MenuItemConstructorOptions } from 'electron'
 import type { ViewMode } from '../../shared/ipc'
 import { IpcChannels } from '../../shared/ipc'
 
@@ -6,6 +6,22 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): Menu {
   const send = (channel: string, ...args: unknown[]) => {
     const win = getWindow()
     win?.webContents.send(channel, ...args)
+  }
+
+  const openPdfDialog = async () => {
+    const win = getWindow()
+    if (!win) {
+      return
+    }
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Open PDF',
+      properties: ['openFile'],
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return
+    }
+    win.webContents.send('app:open-path', result.filePaths[0])
   }
 
   const isMac = process.platform === 'darwin'
@@ -33,7 +49,9 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): Menu {
         {
           label: 'Open…',
           accelerator: 'CmdOrCtrl+O',
-          click: () => send(IpcChannels.menuOpen),
+          click: () => {
+            void openPdfDialog()
+          },
         },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },

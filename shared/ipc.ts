@@ -35,7 +35,7 @@ export type RenderedPage = {
   width: number
   height: number
   mimeType: 'image/jpeg'
-  data: Uint8Array
+  dataBase64: string
   requestId: string
 }
 

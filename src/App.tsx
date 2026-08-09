@@ -13,6 +13,7 @@ export default function App() {
     document,
     busy,
     error,
+    setError,
     passwordPromptPath,
     setPasswordPromptPath,
     openPath,
@@ -71,13 +72,13 @@ export default function App() {
   }, [document?.path])
 
   useEffect(() => {
-    const offOpen = window.redColumn.onMenuOpen(() => {
+    const offOpen = window.markStratum.onMenuOpen(() => {
       void openDialog()
     })
-    const offMode = window.redColumn.onMenuSetViewMode((mode) => {
+    const offMode = window.markStratum.onMenuSetViewMode((mode) => {
       setViewMode(mode)
     })
-    const offZoom = window.redColumn.onMenuZoom((command) => {
+    const offZoom = window.markStratum.onMenuZoom((command) => {
       if (command === 'in') {
         setScale((value) => clampScale(value * ZOOM_STEP))
       } else if (command === 'out') {
@@ -90,7 +91,7 @@ export default function App() {
         applyFit('page')
       }
     })
-    const offPath = window.redColumn.onOpenPath((filePath) => {
+    const offPath = window.markStratum.onOpenPath((filePath) => {
       void openPath(filePath)
     })
     return () => {
@@ -134,6 +135,7 @@ export default function App() {
         onOpenFilePath={(filePath) => {
           void openPath(filePath)
         }}
+        onRenderError={setError}
         renderPageToUrl={renderPageToUrl}
         viewportWidth={viewportSize.width}
       />

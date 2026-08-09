@@ -8,7 +8,7 @@ import type {
   ViewMode,
 } from '../shared/ipc'
 
-type RedColumnApi = {
+type MarkStratumApi = {
   openPath: (filePath: string, password?: string) => Promise<OpenDocumentResult>
   openDialog: () => Promise<OpenDocumentResult | null>
   closeDocument: () => Promise<void>
@@ -22,7 +22,7 @@ type RedColumnApi = {
 
 declare global {
   interface Window {
-    redColumn: RedColumnApi
+    markStratum: MarkStratumApi
   }
 }
 

@@ -7,14 +7,19 @@ import type {
   RenderPageRequest,
 } from '../../../shared/ipc'
 import { LruCache, makePageCacheKey } from './pageCache'
-import { PdfiumEngine, type PdfDocumentHandle, type PdfEngine } from './pdfEngine'
+import {
+  PdfiumEngine,
+  type EngineRenderedPage,
+  type PdfDocumentHandle,
+  type PdfEngine,
+} from './pdfEngine'
 
 const DEFAULT_CACHE_ENTRIES = 48
 
 export class DocumentSession {
   private readonly engine: PdfEngine
-  private readonly cache = new LruCache<RenderedPage>(DEFAULT_CACHE_ENTRIES)
-  private readonly inflight = new Map<string, Promise<RenderedPage>>()
+  private readonly cache = new LruCache<EngineRenderedPage>(DEFAULT_CACHE_ENTRIES)
+  private readonly inflight = new Map<string, Promise<EngineRenderedPage>>()
   private readonly queue: Array<() => void> = []
   private activeWorkers = 0
   private readonly maxWorkers: number
@@ -72,13 +77,13 @@ export class DocumentSession {
     const key = makePageCacheKey(req.pageIndex, req.scale, rotation)
     const cached = this.cache.get(key)
     if (cached) {
-      return { ...cached, requestId: req.requestId }
+      return toWirePage(cached, req.requestId)
     }
 
     const existing = this.inflight.get(key)
     if (existing) {
       const rendered = await existing
-      return { ...rendered, requestId: req.requestId }
+      return toWirePage(rendered, req.requestId)
     }
 
     const handle = this.current.handle
@@ -95,7 +100,7 @@ export class DocumentSession {
 
     this.inflight.set(key, promise)
     const rendered = await promise
-    return { ...rendered, requestId: req.requestId }
+    return toWirePage(rendered, req.requestId)
   }
 
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -119,5 +124,17 @@ export class DocumentSession {
         this.queue.push(run)
       }
     })
+  }
+}
+
+function toWirePage(rendered: EngineRenderedPage, requestId: string): RenderedPage {
+  return {
+    pageIndex: rendered.pageIndex,
+    scale: rendered.scale,
+    width: rendered.width,
+    height: rendered.height,
+    mimeType: rendered.mimeType,
+    dataBase64: rendered.data.toString('base64'),
+    requestId,
   }
 }

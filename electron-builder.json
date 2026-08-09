@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "com.redcolumn.pdf",
-  "productName": "RedColumn",
+  "appId": "com.markstratum.pdf",
+  "productName": "MarkStratum",
   "asar": true,
   "npmRebuild": false,
   "directories": {
@@ -10,10 +10,15 @@
   "files": [
     "dist-electron",
     "dist",
-    "package.json"
+    "package.json",
+    {
+      "from": "node_modules/pdfium-native/build/Release",
+      "to": "node_modules/pdfium-native/build/Release",
+      "filter": ["*.node", "*.dll", "*.dylib", "*.so"]
+    }
   ],
   "asarUnpack": [
-    "**/node_modules/pdfium-native/**"
+    "**/node_modules/pdfium-native/build/Release/**"
   ],
   "mac": {
     "artifactName": "${productName}-${version}-${arch}.${ext}",

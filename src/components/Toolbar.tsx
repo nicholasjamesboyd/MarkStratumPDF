@@ -31,7 +31,7 @@ export function Toolbar({
 }: ToolbarProps) {
   return (
     <header className="toolbar">
-      <div className="brand">RedColumn</div>
+      <div className="brand">MarkStratum</div>
       <div className="toolbar-group">
         <button type="button" className="primary" onClick={onOpen} disabled={busy}>
           Open
