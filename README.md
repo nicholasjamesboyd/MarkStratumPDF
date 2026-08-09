@@ -51,6 +51,8 @@ Useful scripts:
 
 PDF access goes through a `PdfEngine` interface so the renderer never loads native code, and the engine can later grow tiled rendering without rewriting the UI.
 
+For the overall product plan, MVP status, and next phases, see [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).

@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -11,6 +10,9 @@ import {
 import type { DocumentInfo, ViewMode } from '../../shared/ipc'
 
 const PAGE_GAP = 12
+const PREFETCH_BEHIND = 2
+const PREFETCH_AHEAD = 5
+const RENDER_CONCURRENCY = 4
 
 type PdfViewportProps = {
   document: DocumentInfo | null
@@ -22,6 +24,7 @@ type PdfViewportProps = {
   onOpenFilePath: (filePath: string) => void
   onRenderError: (message: string) => void
   renderPageToUrl: (req: {
+    documentId: string
     pageIndex: number
     scale: number
     requestId: string
@@ -51,18 +54,20 @@ export function PdfViewport({
   const scrollRef = useRef<HTMLDivElement>(null)
   const drawingRef = useRef<HTMLDivElement>(null)
   const [images, setImages] = useState<Record<number, PageImage>>({})
-  const imagesRef = useRef(images)
   const [visiblePages, setVisiblePages] = useState<number[]>([0])
   const [pan, setPan] = useState({ x: 40, y: 40 })
   const [panning, setPanning] = useState(false)
   const panStart = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null)
-  const requestSerial = useRef(0)
   const ignoreScrollSync = useRef(false)
+  const syncingPageFromScroll = useRef(false)
+  const prevPageIndexForJump = useRef(pageIndex)
+  const lastScrollTop = useRef(0)
+  const scrollDirection = useRef(1)
+  const imagesRef = useRef(images)
   const documentPath = document?.path ?? null
+  const renderGen = useRef(0)
 
-  useEffect(() => {
-    imagesRef.current = images
-  }, [images])
+  imagesRef.current = images
 
   const pageLayouts = useMemo(() => {
     if (!document) {
@@ -82,71 +87,117 @@ export function PdfViewport({
     ? pageLayouts[pageLayouts.length - 1].y + pageLayouts[pageLayouts.length - 1].height
     : 0
 
-  const requestPages = useCallback(
-    async (indices: number[], pathAtRequest: string | null) => {
-      if (!document || !pathAtRequest || document.path !== pathAtRequest) {
-        return
-      }
-      const unique = [...new Set(indices)].filter(
-        (index) => index >= 0 && index < document.pageCount,
-      )
-      await Promise.all(
-        unique.map(async (index) => {
-          const existing = imagesRef.current[index]
-          if (existing && Math.abs(existing.scale - scale) < 0.001) {
-            return
-          }
-          const requestId = `${++requestSerial.current}`
-          try {
-            const rendered = await renderPageToUrl({
-              pageIndex: index,
-              scale,
-              requestId,
-            })
-            if (documentPath !== pathAtRequest) {
-              return
-            }
-            setImages((prev) => ({
-              ...prev,
-              [index]: rendered,
-            }))
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            onRenderError(`Could not render page ${index + 1}: ${message}`)
-          }
-        }),
-      )
-    },
-    [document, documentPath, onRenderError, renderPageToUrl, scale],
-  )
-
   useEffect(() => {
     setImages({})
-    imagesRef.current = {}
     setVisiblePages([0])
     setPan({ x: 40, y: 40 })
+    lastScrollTop.current = 0
+    scrollDirection.current = 1
+    prevPageIndexForJump.current = -1
+    syncingPageFromScroll.current = false
+    renderGen.current += 1
   }, [documentPath])
 
   useEffect(() => {
-    if (!documentPath) {
-      return
-    }
-    void requestPages(expandAround(visiblePages, document?.pageCount ?? 0), documentPath)
-  }, [document?.pageCount, documentPath, requestPages, scale, visiblePages])
+    renderGen.current += 1
+  }, [scale])
 
   useEffect(() => {
-    if (viewMode !== 'document' || !scrollRef.current || !pageLayouts[pageIndex]) {
+    if (!document || !documentPath) {
       return
     }
-    ignoreScrollSync.current = true
-    scrollRef.current.scrollTo({
-      top: Math.max(0, pageLayouts[pageIndex].y - 16),
-      behavior: 'auto',
+
+    const generation = renderGen.current
+    const center = visiblePages[0] ?? pageIndex
+    const behind = scrollDirection.current < 0 ? PREFETCH_AHEAD : PREFETCH_BEHIND
+    const ahead = scrollDirection.current < 0 ? PREFETCH_BEHIND : PREFETCH_AHEAD
+    const targets = prioritizePages(
+      expandAround(visiblePages, document.pageCount, behind, ahead),
+      center,
+    ).filter((index) => {
+      const existing = imagesRef.current[index]
+      return !existing || Math.abs(existing.scale - scale) >= 0.001
     })
-    window.setTimeout(() => {
+
+    if (targets.length === 0) {
+      return
+    }
+
+    let cancelled = false
+
+    void runPool(targets, RENDER_CONCURRENCY, async (index) => {
+      if (cancelled || generation !== renderGen.current) {
+        return
+      }
+      const existing = imagesRef.current[index]
+      if (existing && Math.abs(existing.scale - scale) < 0.001) {
+        return
+      }
+      try {
+        const rendered = await renderPageToUrl({
+          documentId: document.documentId,
+          pageIndex: index,
+          scale,
+          requestId: `${generation}-${index}-${scale}`,
+        })
+        // Apply finished work even if this effect was superseded by a scroll
+        // update, as long as the document scale generation is still current.
+        if (generation !== renderGen.current) {
+          return
+        }
+        setImages((prev) => {
+          const current = prev[index]
+          if (current && Math.abs(current.scale - rendered.scale) < 0.001) {
+            return prev
+          }
+          return {
+            ...prev,
+            [index]: rendered,
+          }
+        })
+      } catch (error) {
+        if (generation === renderGen.current) {
+          const message = error instanceof Error ? error.message : String(error)
+          onRenderError(`Could not render page ${index + 1}: ${message}`)
+        }
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [document, documentPath, onRenderError, pageIndex, renderPageToUrl, scale, visiblePages])
+
+  useEffect(() => {
+    const pageChanged = prevPageIndexForJump.current !== pageIndex
+    prevPageIndexForJump.current = pageIndex
+
+    // Scroll-driven page updates must not re-anchor the viewport to page top.
+    if (syncingPageFromScroll.current) {
+      syncingPageFromScroll.current = false
+      return
+    }
+
+    if (!pageChanged || viewMode !== 'document' || !scrollRef.current || !pageLayouts[pageIndex]) {
+      return
+    }
+
+    ignoreScrollSync.current = true
+    const top = Math.max(0, pageLayouts[pageIndex].y - 16)
+    scrollRef.current.scrollTo({ top, behavior: 'auto' })
+    lastScrollTop.current = top
+    const timer = window.setTimeout(() => {
       ignoreScrollSync.current = false
-    }, 50)
+    }, 120)
+    return () => window.clearTimeout(timer)
   }, [pageIndex, pageLayouts, viewMode])
+
+  useEffect(() => {
+    if (viewMode !== 'drawing') {
+      return
+    }
+    setVisiblePages(expandAround([pageIndex], document?.pageCount ?? 0, PREFETCH_BEHIND, PREFETCH_AHEAD))
+  }, [document?.pageCount, pageIndex, viewMode])
 
   const onDocumentScroll = () => {
     const el = scrollRef.current
@@ -154,6 +205,12 @@ export function PdfViewport({
       return
     }
     const top = el.scrollTop
+    const delta = top - lastScrollTop.current
+    if (Math.abs(delta) > 1) {
+      scrollDirection.current = delta > 0 ? 1 : -1
+    }
+    lastScrollTop.current = top
+
     const bottom = top + el.clientHeight
     const nextVisible: number[] = []
     let current = 0
@@ -169,18 +226,12 @@ export function PdfViewport({
     if (nextVisible.length === 0 && pageLayouts.length) {
       nextVisible.push(Math.min(pageLayouts.length - 1, Math.max(0, current)))
     }
-    setVisiblePages(nextVisible)
+    setVisiblePages((prev) => (sameNumberList(prev, nextVisible) ? prev : nextVisible))
     if (current !== pageIndex) {
+      syncingPageFromScroll.current = true
       onPageIndexChange(current)
     }
   }
-
-  useEffect(() => {
-    if (viewMode !== 'drawing') {
-      return
-    }
-    setVisiblePages(expandAround([pageIndex], document?.pageCount ?? 0))
-  }, [document?.pageCount, pageIndex, viewMode])
 
   const onDragOver = (event: DragEvent) => {
     event.preventDefault()
@@ -189,10 +240,7 @@ export function PdfViewport({
   const onDrop = (event: DragEvent) => {
     event.preventDefault()
     const file = event.dataTransfer.files?.[0]
-    if (!file) {
-      return
-    }
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
+    if (!file?.name.toLowerCase().endsWith('.pdf')) {
       return
     }
     const filePath = window.markStratum.getPathForFile(file)
@@ -219,11 +267,9 @@ export function PdfViewport({
     if (!panning || !panStart.current) {
       return
     }
-    const dx = event.clientX - panStart.current.x
-    const dy = event.clientY - panStart.current.y
     setPan({
-      x: panStart.current.panX + dx,
-      y: panStart.current.panY + dy,
+      x: panStart.current.panX + (event.clientX - panStart.current.x),
+      y: panStart.current.panY + (event.clientY - panStart.current.y),
     })
   }
 
@@ -251,8 +297,7 @@ export function PdfViewport({
     }
     const cursorX = event.clientX - rect.left
     const cursorY = event.clientY - rect.top
-    const delta = event.deltaY > 0 ? 0.9 : 1.1
-    const nextScale = clampScale(scale * delta)
+    const nextScale = clampScale(scale * (event.deltaY > 0 ? 0.9 : 1.1))
     const ratio = nextScale / scale
     setPan({
       x: cursorX - (cursorX - pan.x) * ratio,
@@ -265,9 +310,15 @@ export function PdfViewport({
     return (
       <div className="viewport-shell" onDragOver={onDragOver} onDrop={onDrop}>
         <div className="empty-state">
-          <h1>Open a PDF to begin</h1>
+          <img
+            className="brand-logo"
+            src="/markstratum-logo.png"
+            alt="MarkStratum"
+            width={360}
+            height={196}
+          />
           <p>
-            Use Open, drag a PDF onto this window, or choose File → Open.
+            Drag a PDF onto this window, or choose File → Open.
             Switch to Drawing mode for pan and zoom on large sheets.
           </p>
         </div>
@@ -291,11 +342,7 @@ export function PdfViewport({
             className="drawing-stage"
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px)`,
-              width: Math.max(
-                viewportWidth,
-                ...pageLayouts.map((page) => page.width),
-                1,
-              ),
+              width: Math.max(viewportWidth, ...pageLayouts.map((page) => page.width), 1),
               height: Math.max(totalHeight, 1),
             }}
           >
@@ -306,7 +353,7 @@ export function PdfViewport({
                   width={layout.width}
                   height={layout.height}
                   label={`Page ${layout.index + 1}`}
-                  image={images[layout.index]}
+                  image={imageForScale(images[layout.index], scale)}
                 />
               ))}
             </div>
@@ -332,13 +379,20 @@ export function PdfViewport({
               width={layout.width}
               height={layout.height}
               label={`Page ${layout.index + 1}`}
-              image={images[layout.index]}
+              image={imageForScale(images[layout.index], scale)}
             />
           ))}
         </div>
       </div>
     </div>
   )
+}
+
+function imageForScale(image: PageImage | undefined, scale: number): PageImage | undefined {
+  if (!image || Math.abs(image.scale - scale) >= 0.001) {
+    return undefined
+  }
+  return image
 }
 
 function PageSlot({
@@ -355,7 +409,7 @@ function PageSlot({
   return (
     <div className="page-slot" style={{ width, height }}>
       {image ? (
-        <img src={image.url} alt={label} width={width} height={height} />
+        <img src={image.url} alt={label} width={width} height={height} decoding="async" />
       ) : (
         <div className="page-placeholder">{label}</div>
       )}
@@ -363,13 +417,18 @@ function PageSlot({
   )
 }
 
-function expandAround(indices: number[], pageCount: number): number[] {
+function expandAround(
+  indices: number[],
+  pageCount: number,
+  behind = PREFETCH_BEHIND,
+  ahead = PREFETCH_AHEAD,
+): number[] {
   if (pageCount <= 0) {
     return []
   }
   const set = new Set<number>()
   for (const index of indices) {
-    for (let offset = -1; offset <= 1; offset += 1) {
+    for (let offset = -behind; offset <= ahead; offset += 1) {
       const next = index + offset
       if (next >= 0 && next < pageCount) {
         set.add(next)
@@ -380,6 +439,34 @@ function expandAround(indices: number[], pageCount: number): number[] {
     set.add(0)
   }
   return [...set]
+}
+
+function prioritizePages(indices: number[], center: number): number[] {
+  return [...indices].sort((a, b) => Math.abs(a - center) - Math.abs(b - center))
+}
+
+async function runPool<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0
+  const run = async () => {
+    while (nextIndex < items.length) {
+      const current = nextIndex
+      nextIndex += 1
+      await worker(items[current])
+    }
+  }
+  const size = Math.max(1, Math.min(concurrency, items.length))
+  await Promise.all(Array.from({ length: size }, () => run()))
+}
+
+function sameNumberList(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) {
+    return false
+  }
+  return a.every((value, index) => value === b[index])
 }
 
 function clampScale(scale: number): number {

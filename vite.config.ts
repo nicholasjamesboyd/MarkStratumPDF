@@ -47,8 +47,15 @@ export default defineConfig(({ command }) => {
               sourcemap: sourcemap ? 'inline' : undefined,
               minify: isBuild,
               outDir: 'dist-electron/preload',
+              // Electron preload must be CommonJS. An .mjs build that still
+              // contains require("electron") fails at runtime.
               rollupOptions: {
                 external,
+                output: {
+                  format: 'cjs',
+                  entryFileNames: '[name].cjs',
+                  chunkFileNames: '[name].cjs',
+                },
               },
             },
           },

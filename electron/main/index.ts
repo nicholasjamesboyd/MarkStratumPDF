@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import os from 'node:os'
@@ -6,9 +7,14 @@ import {
   IpcChannels,
   type OpenDocumentResult,
   type RenderPageRequest,
+  type SaveDocumentResult,
 } from '../../shared/ipc'
+import { concurrency } from 'pdfium-native'
 import { DocumentSession } from './pdf/documentSession'
 import { buildAppMenu } from './menu'
+
+// Serialize native PDFium work in the Electron main process.
+concurrency(1)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -36,9 +42,31 @@ if (!app.requestSingleInstanceLock()) {
 
 let win: BrowserWindow | null = null
 const session = new DocumentSession()
-const preload = path.join(__dirname, '../preload/index.mjs')
+const preloadCandidates = [
+  path.join(__dirname, '../preload/index.cjs'),
+  path.join(__dirname, '../preload/index.js'),
+  path.join(__dirname, '../preload/index.mjs'),
+]
+const preload = preloadCandidates.find((candidate) => existsSync(candidate)) ?? preloadCandidates[0]
 const indexHtml = path.join(RENDERER_DIST, 'index.html')
 let pendingOpenPath: string | undefined
+
+function notifyOpenResult(result: OpenDocumentResult) {
+  win?.webContents.send('app:open-result', result)
+}
+
+async function openPdfWithDialog(parent: BrowserWindow): Promise<void> {
+  const picked = await dialog.showOpenDialog(parent, {
+    title: 'Open PDF',
+    properties: ['openFile'],
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (picked.canceled || picked.filePaths.length === 0) {
+    return
+  }
+  const result = await session.open(picked.filePaths[0])
+  notifyOpenResult(result)
+}
 
 async function createWindow() {
   win = new BrowserWindow({
@@ -47,7 +75,8 @@ async function createWindow() {
     height: 840,
     minWidth: 800,
     minHeight: 560,
-    icon: path.join(process.env.VITE_PUBLIC!, 'favicon.ico'),
+    backgroundColor: '#0f1114',
+    icon: path.join(process.env.VITE_PUBLIC!, 'icon-256.png'),
     webPreferences: {
       preload,
       contextIsolation: true,
@@ -56,10 +85,26 @@ async function createWindow() {
     },
   })
 
-  Menu.setApplicationMenu(buildAppMenu(() => win))
+  Menu.setApplicationMenu(buildAppMenu(() => win, openPdfWithDialog))
+
+  win.webContents.on('before-input-event', (event, input) => {
+    if (
+      input.type === 'keyDown' &&
+      input.key === 'Escape' &&
+      !input.control &&
+      !input.meta &&
+      !input.alt &&
+      !input.shift &&
+      win?.isFullScreen()
+    ) {
+      win.setFullScreen(false)
+      event.preventDefault()
+    }
+  })
 
   if (VITE_DEV_SERVER_URL) {
     await win.loadURL(VITE_DEV_SERVER_URL)
+    win.webContents.openDevTools({ mode: 'detach' })
   } else {
     await win.loadFile(indexHtml)
   }
@@ -75,7 +120,7 @@ async function createWindow() {
     if (pendingOpenPath) {
       const filePath = pendingOpenPath
       pendingOpenPath = undefined
-      win?.webContents.send('app:open-path', filePath)
+      void session.open(filePath).then(notifyOpenResult)
     }
   })
 }
@@ -96,25 +141,60 @@ function registerIpc() {
       if (!parent) {
         return { ok: false, error: 'No window available for the open dialog.' }
       }
-      const result = await dialog.showOpenDialog(parent, {
+      const picked = await dialog.showOpenDialog(parent, {
         title: 'Open PDF',
         properties: ['openFile'],
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       })
-      if (result.canceled || result.filePaths.length === 0) {
+      if (picked.canceled || picked.filePaths.length === 0) {
         return null
       }
-      return session.open(result.filePaths[0])
+      return session.open(picked.filePaths[0])
     },
   )
 
-  ipcMain.handle(IpcChannels.close, async () => {
-    await session.close()
+  ipcMain.handle(IpcChannels.close, async (_event, documentId?: string) => {
+    await session.close(documentId)
   })
 
   ipcMain.handle(IpcChannels.renderPage, async (_event, req: RenderPageRequest) => {
     return session.renderPage(req)
   })
+
+  ipcMain.handle(IpcChannels.getBookmarks, async (_event, documentId: string) => {
+    return session.getBookmarks(documentId)
+  })
+
+  ipcMain.handle(IpcChannels.save, async (_event, documentId: string): Promise<SaveDocumentResult> => {
+    return session.save(documentId)
+  })
+
+  ipcMain.handle(
+    IpcChannels.saveAs,
+    async (event, documentId: string): Promise<SaveDocumentResult | null> => {
+      const entry = session.getDocument(documentId)
+      if (!entry) {
+        return { ok: false, error: 'No document open to save.' }
+      }
+      const parent =
+        BrowserWindow.fromWebContents(event.sender) ?? win ?? BrowserWindow.getFocusedWindow()
+      if (!parent) {
+        return { ok: false, error: 'No window available for the save dialog.' }
+      }
+      const picked = await dialog.showSaveDialog(parent, {
+        title: 'Save As',
+        defaultPath: entry.path,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (picked.canceled || !picked.filePath) {
+        return null
+      }
+      const destPath = picked.filePath.toLowerCase().endsWith('.pdf')
+        ? picked.filePath
+        : `${picked.filePath}.pdf`
+      return session.saveAs(documentId, destPath)
+    },
+  )
 }
 
 app.whenReady().then(async () => {
@@ -138,7 +218,7 @@ app.on('second-instance', (_event, argv) => {
     }
     win.focus()
     if (fileArg) {
-      win.webContents.send('app:open-path', fileArg)
+      void session.open(fileArg).then(notifyOpenResult)
     }
   }
 })

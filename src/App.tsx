@@ -2,15 +2,24 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FitMode, ViewMode } from '../shared/ipc'
 import { PasswordDialog } from './components/PasswordDialog'
 import { PdfViewport } from './components/PdfViewport'
+import { SplitWorkspace } from './components/SplitWorkspace'
 import { StatusBar } from './components/StatusBar'
+import { TabBar } from './components/TabBar'
+import { ToolShelf } from './components/ToolShelf'
 import { Toolbar } from './components/Toolbar'
-import { useDocumentSession } from './hooks/useDocumentSession'
+import { useRecentFiles } from './hooks/useRecentFiles'
+import { useWorkspace, type TabState } from './hooks/useWorkspace'
 
 const ZOOM_STEP = 1.15
 
 export default function App() {
+  const { entries: recentEntries, recordOpen, clear: clearRecent } = useRecentFiles()
   const {
-    document,
+    tabs,
+    layout,
+    focusedPane,
+    focusedTab,
+    focusedTabId,
     busy,
     error,
     setError,
@@ -18,40 +27,60 @@ export default function App() {
     setPasswordPromptPath,
     openPath,
     openDialog,
+    closeTab,
+    closeFocusedTab,
+    saveFocusedDocument,
+    saveFocusedDocumentAs,
     submitPassword,
     renderPageToUrl,
-  } = useDocumentSession()
+    applyOpenResult,
+    activateTabInFocusedPane,
+    updateTab,
+    reorderTabs,
+    toggleSplit,
+    setSplitSizes,
+    setFocusedPane,
+  } = useWorkspace({ onDocumentOpened: recordOpen })
 
-  const [viewMode, setViewMode] = useState<ViewMode>('document')
-  const [scale, setScale] = useState(1)
-  const [pageIndex, setPageIndex] = useState(0)
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 })
 
-  const currentPage = document?.pages[pageIndex]
+  const currentPage = focusedTab?.document.pages[focusedTab.pageIndex]
 
   const applyFit = useCallback(
     (mode: FitMode) => {
+      if (!focusedTab) {
+        return
+      }
       if (!currentPage) {
         if (mode === 'custom') {
-          setScale(1)
+          updateTab(focusedTab.id, { scale: 1 })
         }
         return
       }
       if (mode === 'custom') {
-        setScale(1)
+        updateTab(focusedTab.id, { scale: 1 })
         return
       }
-      const availableWidth = Math.max(200, viewportSize.width - 48)
+      const paneFraction = layout?.mode === 'split' ? layout.sizes[focusedPane] : 1
+      const availableWidth = Math.max(200, viewportSize.width * paneFraction - 48)
       const availableHeight = Math.max(200, viewportSize.height - 24)
       if (mode === 'width') {
-        setScale(clampScale(availableWidth / currentPage.width))
+        updateTab(focusedTab.id, { scale: clampScale(availableWidth / currentPage.width) })
         return
       }
       const widthScale = availableWidth / currentPage.width
       const heightScale = availableHeight / currentPage.height
-      setScale(clampScale(Math.min(widthScale, heightScale)))
+      updateTab(focusedTab.id, { scale: clampScale(Math.min(widthScale, heightScale)) })
     },
-    [currentPage, viewportSize.height, viewportSize.width],
+    [
+      currentPage,
+      focusedPane,
+      focusedTab,
+      layout,
+      updateTab,
+      viewportSize.height,
+      viewportSize.width,
+    ],
   )
 
   useEffect(() => {
@@ -67,83 +96,228 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    setPageIndex(0)
-    setScale(1)
-  }, [document?.path])
-
-  useEffect(() => {
+    if (!window.markStratum) {
+      setError('MarkStratum failed to start its desktop bridge. Rebuild or reinstall the app.')
+      return
+    }
     const offOpen = window.markStratum.onMenuOpen(() => {
       void openDialog()
     })
+    const offClose = window.markStratum.onMenuClose(() => {
+      void closeFocusedTab()
+    })
+    const offSave = window.markStratum.onMenuSave(() => {
+      void saveFocusedDocument()
+    })
+    const offSaveAs = window.markStratum.onMenuSaveAs(() => {
+      void saveFocusedDocumentAs()
+    })
     const offMode = window.markStratum.onMenuSetViewMode((mode) => {
-      setViewMode(mode)
+      if (!focusedTabId) {
+        return
+      }
+      updateTab(focusedTabId, { viewMode: mode })
     })
     const offZoom = window.markStratum.onMenuZoom((command) => {
+      if (!focusedTabId || !focusedTab) {
+        return
+      }
       if (command === 'in') {
-        setScale((value) => clampScale(value * ZOOM_STEP))
+        updateTab(focusedTabId, { scale: clampScale(focusedTab.scale * ZOOM_STEP) })
       } else if (command === 'out') {
-        setScale((value) => clampScale(value / ZOOM_STEP))
+        updateTab(focusedTabId, { scale: clampScale(focusedTab.scale / ZOOM_STEP) })
       } else if (command === 'actual') {
-        setScale(1)
+        updateTab(focusedTabId, { scale: 1 })
       } else if (command === 'fitWidth') {
         applyFit('width')
       } else if (command === 'fitPage') {
         applyFit('page')
       }
     })
+    const offSplit = window.markStratum.onMenuToggleSplit(() => {
+      toggleSplit()
+    })
     const offPath = window.markStratum.onOpenPath((filePath) => {
       void openPath(filePath)
     })
+    const offResult = window.markStratum.onOpenResult((result) => {
+      applyOpenResult(result)
+    })
     return () => {
       offOpen()
+      offClose()
+      offSave()
+      offSaveAs()
       offMode()
       offZoom()
+      offSplit()
       offPath()
+      offResult()
     }
-  }, [applyFit, openDialog, openPath])
+  }, [
+    applyFit,
+    applyOpenResult,
+    closeFocusedTab,
+    focusedTab,
+    focusedTabId,
+    openDialog,
+    openPath,
+    saveFocusedDocument,
+    saveFocusedDocumentAs,
+    setError,
+    toggleSplit,
+    updateTab,
+  ])
 
-  const zoomPercent = useMemo(() => Math.round(scale * 100), [scale])
+  const zoomPercent = useMemo(
+    () => Math.round((focusedTab?.scale ?? 1) * 100),
+    [focusedTab?.scale],
+  )
 
-  return (
-    <div className="app">
-      <Toolbar
-        fileName={document?.fileName ?? null}
-        viewMode={viewMode}
-        zoomPercent={zoomPercent}
-        pageIndex={pageIndex}
-        pageCount={document?.pageCount ?? 0}
-        busy={busy}
-        onOpen={() => {
-          void openDialog()
-        }}
-        onViewModeChange={setViewMode}
-        onZoomIn={() => setScale((value) => clampScale(value * ZOOM_STEP))}
-        onZoomOut={() => setScale((value) => clampScale(value / ZOOM_STEP))}
-        onFit={applyFit}
-        onPageChange={setPageIndex}
-      />
+  const secondaryTabId =
+    layout?.mode === 'split'
+      ? layout.panes[focusedPane === 0 ? 1 : 0]
+      : null
 
-      {error ? <div className="error-banner">{error}</div> : null}
+  const paneWidth = useMemo(() => {
+    if (layout?.mode === 'split') {
+      return Math.max(320, Math.floor(viewportSize.width * layout.sizes[focusedPane] - 8))
+    }
+    return viewportSize.width
+  }, [focusedPane, layout, viewportSize.width])
 
+  const renderPane = (tab: TabState | undefined, width: number) => {
+    if (!tab) {
+      return (
+        <PdfViewport
+          document={null}
+          viewMode="document"
+          scale={1}
+          pageIndex={0}
+          onPageIndexChange={() => undefined}
+          onScaleChange={() => undefined}
+          onOpenFilePath={(filePath) => {
+            void openPath(filePath)
+          }}
+          onRenderError={setError}
+          renderPageToUrl={renderPageToUrl}
+          viewportWidth={width}
+        />
+      )
+    }
+    return (
       <PdfViewport
-        document={document}
-        viewMode={viewMode}
-        scale={scale}
-        pageIndex={pageIndex}
-        onPageIndexChange={setPageIndex}
-        onScaleChange={(next) => setScale(clampScale(next))}
+        key={tab.id}
+        document={tab.document}
+        viewMode={tab.viewMode}
+        scale={tab.scale}
+        pageIndex={tab.pageIndex}
+        onPageIndexChange={(pageIndex) => updateTab(tab.id, { pageIndex })}
+        onScaleChange={(scale) => updateTab(tab.id, { scale: clampScale(scale) })}
         onOpenFilePath={(filePath) => {
           void openPath(filePath)
         }}
         onRenderError={setError}
         renderPageToUrl={renderPageToUrl}
-        viewportWidth={viewportSize.width}
+        viewportWidth={width}
+      />
+    )
+  }
+
+  const leftTab =
+    layout?.mode === 'split'
+      ? tabs.find((tab) => tab.id === layout.panes[0])
+      : focusedTab ?? undefined
+  const rightTab =
+    layout?.mode === 'split'
+      ? tabs.find((tab) => tab.id === layout.panes[1])
+      : undefined
+
+  return (
+    <div className="app">
+      <div className="app-body">
+        <ToolShelf
+          recentEntries={recentEntries}
+          onOpenRecent={(filePath) => {
+            void openPath(filePath)
+          }}
+          onClearRecent={clearRecent}
+          documentId={focusedTab?.document.documentId ?? null}
+          onGoToBookmarkPage={(pageIndex) => {
+            if (!focusedTabId || !focusedTab) {
+              return
+            }
+            const maxIndex = Math.max(0, focusedTab.document.pageCount - 1)
+            const nextIndex = Math.min(maxIndex, Math.max(0, pageIndex))
+            updateTab(focusedTabId, { pageIndex: nextIndex })
+          }}
+        />
+
+        <div className="app-main">
+          {error ? <div className="error-banner">{error}</div> : null}
+
+          <TabBar
+            tabs={tabs}
+            activeTabId={focusedTabId}
+            secondaryTabId={secondaryTabId}
+            onActivate={activateTabInFocusedPane}
+            onClose={(tabId) => {
+              void closeTab(tabId)
+            }}
+            onReorder={reorderTabs}
+          />
+
+          {layout?.mode === 'split' ? (
+            <SplitWorkspace
+              left={renderPane(leftTab, Math.max(320, Math.floor(viewportSize.width * layout.sizes[0] - 8)))}
+              right={renderPane(rightTab, Math.max(320, Math.floor(viewportSize.width * layout.sizes[1] - 8)))}
+              sizes={layout.sizes}
+              focusedPane={focusedPane}
+              onFocusPane={setFocusedPane}
+              onSizesChange={setSplitSizes}
+            />
+          ) : (
+            renderPane(focusedTab ?? undefined, paneWidth)
+          )}
+        </div>
+      </div>
+
+      <Toolbar
+        hasDocument={Boolean(focusedTab)}
+        viewMode={(focusedTab?.viewMode ?? 'document') as ViewMode}
+        zoomPercent={zoomPercent}
+        pageIndex={focusedTab?.pageIndex ?? 0}
+        pageCount={focusedTab?.document.pageCount ?? 0}
+        splitActive={layout?.mode === 'split'}
+        canSplit={tabs.length >= 2}
+        onViewModeChange={(mode) => {
+          if (focusedTabId) {
+            updateTab(focusedTabId, { viewMode: mode })
+          }
+        }}
+        onToggleSplit={toggleSplit}
+        onZoomIn={() => {
+          if (focusedTab) {
+            updateTab(focusedTab.id, { scale: clampScale(focusedTab.scale * ZOOM_STEP) })
+          }
+        }}
+        onZoomOut={() => {
+          if (focusedTab) {
+            updateTab(focusedTab.id, { scale: clampScale(focusedTab.scale / ZOOM_STEP) })
+          }
+        }}
+        onFit={applyFit}
+        onPageChange={(pageIndex) => {
+          if (focusedTabId) {
+            updateTab(focusedTabId, { pageIndex })
+          }
+        }}
       />
 
       <StatusBar
-        viewMode={viewMode}
-        pageIndex={pageIndex}
-        pageCount={document?.pageCount ?? 0}
+        viewMode={focusedTab?.viewMode ?? 'document'}
+        pageIndex={focusedTab?.pageIndex ?? 0}
+        pageCount={focusedTab?.document.pageCount ?? 0}
         zoomPercent={zoomPercent}
         busy={busy}
       />

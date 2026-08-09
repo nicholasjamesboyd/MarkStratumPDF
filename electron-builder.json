@@ -4,8 +4,10 @@
   "productName": "MarkStratum",
   "asar": true,
   "npmRebuild": false,
+  "icon": "build/icon.ico",
   "directories": {
-    "output": "release/${version}"
+    "output": "release/${version}",
+    "buildResources": "build"
   },
   "files": [
     "dist-electron",
@@ -23,6 +25,7 @@
   "mac": {
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "category": "public.app-category.productivity",
+    "icon": "build/icon.png",
     "target": [
       "dmg",
       "zip"
@@ -30,6 +33,7 @@
   },
   "win": {
     "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",
@@ -44,6 +48,7 @@
   "linux": {
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "category": "Office",
+    "icon": "build/icon.png",
     "target": [
       "AppImage",
       "deb"
@@ -53,7 +58,10 @@
     "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": false
+    "deleteAppDataOnUninstall": false,
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerHeaderIcon": "build/icon.ico"
   },
   "fileAssociations": [
     {

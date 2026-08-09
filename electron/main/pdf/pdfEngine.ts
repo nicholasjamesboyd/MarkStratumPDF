@@ -1,10 +1,14 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import {
   loadDocument,
   PDFiumPasswordError,
+  type Bookmark,
   type PDFiumDocument,
   type PDFiumPage,
 } from 'pdfium-native'
-import type { PageInfo, SizePts } from '../../../shared/ipc'
+import type { BookmarkNode, PageInfo, SizePts } from '../../../shared/ipc'
 
 export type PdfDocumentHandle = {
   id: string
@@ -37,6 +41,7 @@ export interface PdfEngine {
   getPageCount(doc: PdfDocumentHandle): number
   getPageSize(doc: PdfDocumentHandle, pageIndex: number): Promise<SizePts>
   getPages(doc: PdfDocumentHandle): Promise<PageInfo[]>
+  getBookmarks(doc: PdfDocumentHandle): Promise<BookmarkNode[]>
   renderPage(doc: PdfDocumentHandle, req: EngineRenderRequest): Promise<EngineRenderedPage>
   close(doc: PdfDocumentHandle): Promise<void>
 }
@@ -98,7 +103,6 @@ export class PdfiumEngine implements PdfEngine {
     }
 
     // Fast open: probe the first page, then reuse its size for placeholders.
-    // Exact per-page sizes can be refined later without blocking the first paint.
     const first = await native.getPage(0)
     let width = DEFAULT_PAGE_WIDTH
     let height = DEFAULT_PAGE_HEIGHT
@@ -119,6 +123,11 @@ export class PdfiumEngine implements PdfEngine {
     }))
   }
 
+  async getBookmarks(doc: PdfDocumentHandle): Promise<BookmarkNode[]> {
+    const bookmarks = await this.requireDoc(doc).native.getBookmarks()
+    return bookmarks.map(toBookmarkNode)
+  }
+
   async renderPage(
     doc: PdfDocumentHandle,
     req: EngineRenderRequest,
@@ -126,22 +135,32 @@ export class PdfiumEngine implements PdfEngine {
     const page = await this.requireDoc(doc).native.getPage(req.pageIndex)
     try {
       const scale = clampScale(req.scale, page)
-      const buffer = await page.render({
-        scale,
-        format: 'jpeg',
-        quality: 85,
-        rotation: req.rotation ?? 0,
-        renderAnnotations: true,
-      })
-      const { width, height } = estimatePixelSize(page, scale, req.rotation ?? 0)
-      return {
-        pageIndex: req.pageIndex,
-        scale,
-        width,
-        height,
-        mimeType: 'image/jpeg',
-        data: Buffer.from(buffer),
-        requestId: req.requestId,
+      const tempDir = mkdtempSync(join(tmpdir(), 'markstratum-render-'))
+      const outputPath = join(tempDir, 'page.jpg')
+      try {
+        // Write to disk instead of returning a Buffer. Returning native render
+        // buffers through Electron's main process can stall on Windows.
+        await page.render({
+          scale,
+          format: 'jpeg',
+          quality: 80,
+          rotation: req.rotation ?? 0,
+          renderAnnotations: true,
+          output: outputPath,
+        })
+        const data = readFileSync(outputPath)
+        const { width, height } = estimatePixelSize(page, scale, req.rotation ?? 0)
+        return {
+          pageIndex: req.pageIndex,
+          scale,
+          width,
+          height,
+          mimeType: 'image/jpeg',
+          data,
+          requestId: req.requestId,
+        }
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true })
       }
     } finally {
       page.close()
@@ -172,6 +191,17 @@ function normalizeRotation(value: number): 0 | 1 | 2 | 3 {
     return mod
   }
   return 0
+}
+
+function toBookmarkNode(bookmark: Bookmark): BookmarkNode {
+  return {
+    title: bookmark.title,
+    pageIndex: bookmark.pageIndex,
+    open: bookmark.open,
+    actionType: bookmark.actionType,
+    url: bookmark.url,
+    children: bookmark.children?.map(toBookmarkNode),
+  }
 }
 
 function clampScale(scale: number, page: PDFiumPage): number {
