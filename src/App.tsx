@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FitMode, ViewMode } from '../shared/ipc'
 import { PasswordDialog } from './components/PasswordDialog'
 import { PdfViewport } from './components/PdfViewport'
@@ -40,9 +40,11 @@ export default function App() {
     toggleSplit,
     setSplitSizes,
     setFocusedPane,
+    setFormValuesForDocument,
   } = useWorkspace({ onDocumentOpened: recordOpen })
 
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 })
+  const startupOpenPathRef = useRef<string | null | undefined>(undefined)
 
   const currentPage = focusedTab?.document.pages[focusedTab.pageIndex]
 
@@ -169,6 +171,27 @@ export default function App() {
     updateTab,
   ])
 
+  useEffect(() => {
+    if (!window.markStratum) {
+      return
+    }
+    let active = true
+    void (async () => {
+      if (startupOpenPathRef.current === undefined) {
+        startupOpenPathRef.current = await window.markStratum.takePendingOpenPath()
+      }
+      const filePath = startupOpenPathRef.current
+      if (!active || !filePath) {
+        return
+      }
+      startupOpenPathRef.current = null
+      await openPath(filePath)
+    })()
+    return () => {
+      active = false
+    }
+  }, [openPath])
+
   const zoomPercent = useMemo(
     () => Math.round((focusedTab?.scale ?? 1) * 100),
     [focusedTab?.scale],
@@ -220,6 +243,11 @@ export default function App() {
         onRenderError={setError}
         renderPageToUrl={renderPageToUrl}
         viewportWidth={width}
+        formFields={tab.formFields}
+        formRevision={tab.formRevision}
+        onFormValuesChange={(updates) => {
+          void setFormValuesForDocument(tab.document.documentId, updates)
+        }}
       />
     )
   }

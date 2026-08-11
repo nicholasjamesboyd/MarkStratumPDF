@@ -89,7 +89,9 @@ export function TabBar({
               onDragEnd={onDragEnd}
               onClick={() => onActivate(tab.id)}
             >
-              <span className="tab-label">{tab.document.fileName}</span>
+              <span className="tab-label">
+                {tab.document.dirty ? `${tab.document.fileName} *` : tab.document.fileName}
+              </span>
             </button>
             <button
               type="button"

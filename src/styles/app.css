@@ -635,6 +635,59 @@ select {
   );
 }
 
+.form-field-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.form-field-control {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: auto;
+  margin: 0;
+  border: 1px solid rgba(30, 90, 160, 0.55);
+  background: rgba(255, 255, 252, 0.94);
+  color: #111;
+  font: 12px/1.2 "Segoe UI", "Helvetica Neue", sans-serif;
+  padding: 1px 3px;
+  z-index: 2;
+}
+
+.form-field-text {
+  resize: none;
+  overflow: hidden;
+}
+
+.form-field-checkbox,
+.form-field-radio {
+  display: grid;
+  place-content: center;
+  background: rgba(255, 255, 252, 0.72);
+  border-style: dashed;
+  cursor: pointer;
+}
+
+.form-field-checkbox input,
+.form-field-radio input {
+  width: 70%;
+  height: 70%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.form-field-select {
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.form-field-control:focus,
+.form-field-control:focus-within {
+  outline: 2px solid rgba(40, 120, 220, 0.85);
+  outline-offset: 1px;
+  z-index: 3;
+}
+
 .drawing-viewport {
   height: 100%;
   overflow: hidden;

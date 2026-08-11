@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   DocumentInfo,
+  FormFieldInfo,
+  FormValueUpdate,
   OpenDocumentResult,
   RenderedPage,
   RenderPageRequest,
@@ -13,6 +15,8 @@ export type TabState = {
   pageIndex: number
   scale: number
   viewMode: ViewMode
+  formFields: FormFieldInfo[]
+  formRevision: number
 }
 
 export type WorkspaceLayout =
@@ -85,6 +89,25 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     })
   }, [focusedPane])
 
+  const loadFormFields = useCallback(async (documentId: string, bumpRevision = false) => {
+    try {
+      const fields = await window.markStratum.getFormFields(documentId)
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === documentId
+            ? {
+                ...tab,
+                formFields: fields,
+                formRevision: bumpRevision ? tab.formRevision + 1 : tab.formRevision,
+              }
+            : tab,
+        ),
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
   const addOrFocusDocument = useCallback(
     (document: DocumentInfo) => {
       setPasswordPromptPath(null)
@@ -103,6 +126,8 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
         pageIndex: 0,
         scale: 1,
         viewMode: 'document',
+        formFields: [],
+        formRevision: 0,
       }
       setTabs((prev) => [...prev, next])
       setLayout((current) => {
@@ -113,8 +138,9 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
         panes[focusedPane] = next.id
         return { ...current, panes }
       })
+      void loadFormFields(document.documentId)
     },
-    [activateTabInFocusedPane, focusedPane],
+    [activateTabInFocusedPane, focusedPane, loadFormFields],
   )
 
   const applyOpenResult = useCallback(
@@ -200,6 +226,39 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     onDocumentOpenedRef.current?.(document.path)
   }, [])
 
+  const refreshAfterSave = useCallback(
+    async (document: DocumentInfo) => {
+      applyDocumentInfo(document)
+      await loadFormFields(document.documentId, true)
+    },
+    [applyDocumentInfo, loadFormFields],
+  )
+
+  const setFormValuesForDocument = useCallback(
+    async (documentId: string, updates: FormValueUpdate[]) => {
+      if (updates.length === 0) {
+        return
+      }
+      try {
+        const result = await window.markStratum.setFormValues(documentId, updates)
+        if (!result.ok) {
+          setError(result.error)
+          return
+        }
+        applyDocumentInfo(result.document)
+        const fields = await window.markStratum.getFormFields(documentId)
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === documentId ? { ...tab, formFields: fields } : tab,
+          ),
+        )
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [applyDocumentInfo],
+  )
+
   const saveFocusedDocument = useCallback(async () => {
     const tab = tabsRef.current.find((entry) => entry.id === focusedTabId)
     if (!tab) {
@@ -214,13 +273,13 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
         setError(result.error)
         return
       }
-      applyDocumentInfo(result.document)
+      await refreshAfterSave(result.document)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
-  }, [applyDocumentInfo, focusedTabId])
+  }, [focusedTabId, refreshAfterSave])
 
   const saveFocusedDocumentAs = useCallback(async () => {
     const tab = tabsRef.current.find((entry) => entry.id === focusedTabId)
@@ -239,13 +298,13 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
         setError(result.error)
         return
       }
-      applyDocumentInfo(result.document)
+      await refreshAfterSave(result.document)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
-  }, [applyDocumentInfo, focusedTabId])
+  }, [focusedTabId, refreshAfterSave])
 
   const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
     setTabs((prev) => {
@@ -398,6 +457,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     closeFocusedTab,
     saveFocusedDocument,
     saveFocusedDocumentAs,
+    setFormValuesForDocument,
     toggleSplit,
     setSplitSizes,
     setFocusedPane,

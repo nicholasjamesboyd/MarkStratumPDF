@@ -5,6 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import {
   IpcChannels,
+  type FormValueUpdate,
   type OpenDocumentResult,
   type RenderPageRequest,
   type SaveDocumentResult,
@@ -50,6 +51,29 @@ const preloadCandidates = [
 const preload = preloadCandidates.find((candidate) => existsSync(candidate)) ?? preloadCandidates[0]
 const indexHtml = path.join(RENDERER_DIST, 'index.html')
 let pendingOpenPath: string | undefined
+let rendererReady = false
+
+function findPdfArg(argv: string[]): string | undefined {
+  // Skip the executable and Electron/Chromium flags; prefer the last PDF path.
+  const candidates = argv.filter((arg, index) => {
+    if (index === 0) {
+      return false
+    }
+    if (arg.startsWith('-')) {
+      return false
+    }
+    return arg.toLowerCase().endsWith('.pdf')
+  })
+  return candidates.at(-1)
+}
+
+function queueOpenPath(filePath: string) {
+  if (rendererReady && win && !win.isDestroyed()) {
+    win.webContents.send('app:open-path', filePath)
+    return
+  }
+  pendingOpenPath = filePath
+}
 
 function notifyOpenResult(result: OpenDocumentResult) {
   win?.webContents.send('app:open-result', result)
@@ -102,6 +126,8 @@ async function createWindow() {
     }
   })
 
+  rendererReady = false
+
   if (VITE_DEV_SERVER_URL) {
     await win.loadURL(VITE_DEV_SERVER_URL)
     win.webContents.openDevTools({ mode: 'detach' })
@@ -116,12 +142,9 @@ async function createWindow() {
     return { action: 'deny' }
   })
 
-  win.webContents.on('did-finish-load', () => {
-    if (pendingOpenPath) {
-      const filePath = pendingOpenPath
-      pendingOpenPath = undefined
-      void session.open(filePath).then(notifyOpenResult)
-    }
+  win.on('closed', () => {
+    rendererReady = false
+    win = null
   })
 }
 
@@ -165,6 +188,17 @@ function registerIpc() {
     return session.getBookmarks(documentId)
   })
 
+  ipcMain.handle(IpcChannels.getFormFields, async (_event, documentId: string) => {
+    return session.getFormFields(documentId)
+  })
+
+  ipcMain.handle(
+    IpcChannels.setFormValues,
+    async (_event, documentId: string, updates: FormValueUpdate[]) => {
+      return session.setFormValues(documentId, updates)
+    },
+  )
+
   ipcMain.handle(IpcChannels.save, async (_event, documentId: string): Promise<SaveDocumentResult> => {
     return session.save(documentId)
   })
@@ -195,6 +229,13 @@ function registerIpc() {
       return session.saveAs(documentId, destPath)
     },
   )
+
+  ipcMain.handle(IpcChannels.takePendingOpenPath, (): string | null => {
+    rendererReady = true
+    const filePath = pendingOpenPath
+    pendingOpenPath = undefined
+    return filePath ?? null
+  })
 }
 
 app.whenReady().then(async () => {
@@ -211,15 +252,15 @@ app.on('window-all-closed', () => {
 })
 
 app.on('second-instance', (_event, argv) => {
-  const fileArg = argv.find((arg) => arg.toLowerCase().endsWith('.pdf'))
+  const fileArg = findPdfArg(argv)
   if (win) {
     if (win.isMinimized()) {
       win.restore()
     }
     win.focus()
-    if (fileArg) {
-      void session.open(fileArg).then(notifyOpenResult)
-    }
+  }
+  if (fileArg) {
+    queueOpenPath(fileArg)
   }
 })
 
@@ -229,7 +270,15 @@ app.on('activate', () => {
   }
 })
 
-const openFromArgv = process.argv.find((arg) => arg.toLowerCase().endsWith('.pdf'))
+// macOS: double-clicked / Open With files arrive here, sometimes before ready.
+app.on('open-file', (event, filePath) => {
+  event.preventDefault()
+  if (filePath.toLowerCase().endsWith('.pdf')) {
+    queueOpenPath(filePath)
+  }
+})
+
+const openFromArgv = findPdfArg(process.argv)
 if (openFromArgv) {
   pendingOpenPath = openFromArgv
 }

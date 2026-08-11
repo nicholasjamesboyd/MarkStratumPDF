@@ -1,6 +1,7 @@
-import { writeFileSync, mkdtempSync } from 'node:fs'
+import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PDFDocument } from 'pdf-lib'
 import { describe, expect, it } from 'vitest'
 import { DocumentSession } from '../electron/main/pdf/documentSession'
 
@@ -28,6 +29,19 @@ startxref
 %%EOF
 `
   writeFileSync(filePath, content, 'utf8')
+}
+
+async function writeFillablePdf(filePath: string) {
+  const pdf = await PDFDocument.create()
+  const page = pdf.addPage([400, 300])
+  const form = pdf.getForm()
+  const name = form.createTextField('FullName')
+  name.addToPage(page, { x: 40, y: 200, width: 200, height: 24 })
+  name.setText('Initial')
+  const agree = form.createCheckBox('Agree')
+  agree.addToPage(page, { x: 40, y: 160, width: 18, height: 18 })
+  const bytes = await pdf.save()
+  writeFileSync(filePath, bytes)
 }
 
 describe('DocumentSession multi-doc', () => {
@@ -70,5 +84,85 @@ describe('DocumentSession multi-doc', () => {
 
     await session.close()
     expect(session.documentIds).toHaveLength(0)
+  })
+})
+
+describe('DocumentSession form save', () => {
+  it('persists form values on save and keeps the same documentId', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'markstratum-session-form-'))
+    const filePath = join(dir, 'form.pdf')
+    await writeFillablePdf(filePath)
+
+    const session = new DocumentSession()
+    const opened = await session.open(filePath)
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) {
+      return
+    }
+
+    const documentId = opened.document.documentId
+    const fieldsBefore = await session.getFormFields(documentId)
+    expect(fieldsBefore.some((field) => field.name === 'FullName')).toBe(true)
+
+    const updated = await session.setFormValues(documentId, [
+      { name: 'FullName', value: 'Katherine Johnson' },
+      { name: 'Agree', value: 'true' },
+    ])
+    expect(updated.ok).toBe(true)
+    if (updated.ok) {
+      expect(updated.document.dirty).toBe(true)
+    }
+
+    const saved = await session.save(documentId)
+    expect(saved.ok).toBe(true)
+    if (!saved.ok) {
+      return
+    }
+    expect(saved.document.documentId).toBe(documentId)
+    expect(saved.document.dirty).toBe(false)
+
+    const fieldsAfter = await session.getFormFields(documentId)
+    const nameField = fieldsAfter.find((field) => field.name === 'FullName')
+    const agreeField = fieldsAfter.find((field) => field.name === 'Agree')
+    expect(nameField?.value).toBe('Katherine Johnson')
+    expect(agreeField?.isChecked).toBe(true)
+
+    const onDisk = await PDFDocument.load(readFileSync(filePath))
+    expect(onDisk.getForm().getTextField('FullName').getText()).toBe('Katherine Johnson')
+    expect(onDisk.getForm().getCheckBox('Agree').isChecked()).toBe(true)
+
+    await session.close()
+  })
+
+  it('saveAs writes a new path and updates document info', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'markstratum-session-saveas-'))
+    const source = join(dir, 'form.pdf')
+    const dest = join(dir, 'copy.pdf')
+    await writeFillablePdf(source)
+
+    const session = new DocumentSession()
+    const opened = await session.open(source)
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) {
+      return
+    }
+
+    await session.setFormValues(opened.document.documentId, [
+      { name: 'FullName', value: 'Saved As Name' },
+    ])
+    const result = await session.saveAs(opened.document.documentId, dest)
+    expect(result.ok).toBe(true)
+    if (!result.ok) {
+      return
+    }
+    expect(result.document.path).toBe(dest)
+    expect(result.document.fileName).toBe('copy.pdf')
+    expect(result.document.dirty).toBe(false)
+    expect(result.document.documentId).toBe(opened.document.documentId)
+
+    const onDisk = await PDFDocument.load(readFileSync(dest))
+    expect(onDisk.getForm().getTextField('FullName').getText()).toBe('Saved As Name')
+
+    await session.close()
   })
 })

@@ -7,7 +7,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react'
-import type { DocumentInfo, ViewMode } from '../../shared/ipc'
+import type { DocumentInfo, FormFieldInfo, FormValueUpdate, ViewMode } from '../../shared/ipc'
+import { FormFieldOverlays } from './FormFieldOverlays'
 
 const PAGE_GAP = 12
 const PREFETCH_BEHIND = 2
@@ -30,6 +31,9 @@ type PdfViewportProps = {
     requestId: string
   }) => Promise<{ url: string; width: number; height: number; scale: number }>
   viewportWidth: number
+  formFields?: FormFieldInfo[]
+  formRevision?: number
+  onFormValuesChange?: (updates: FormValueUpdate[]) => void
 }
 
 type PageImage = {
@@ -50,6 +54,9 @@ export function PdfViewport({
   onRenderError,
   renderPageToUrl,
   viewportWidth,
+  formFields = [],
+  formRevision = 0,
+  onFormValuesChange,
 }: PdfViewportProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const drawingRef = useRef<HTMLDivElement>(null)
@@ -97,6 +104,14 @@ export function PdfViewport({
     syncingPageFromScroll.current = false
     renderGen.current += 1
   }, [documentPath])
+
+  useEffect(() => {
+    if (formRevision <= 0) {
+      return
+    }
+    setImages({})
+    renderGen.current += 1
+  }, [formRevision])
 
   useEffect(() => {
     renderGen.current += 1
@@ -253,6 +268,10 @@ export function PdfViewport({
     if (viewMode !== 'drawing' || event.button !== 0) {
       return
     }
+    const target = event.target as HTMLElement | null
+    if (target?.closest('.form-field-control, .form-field-layer label')) {
+      return
+    }
     setPanning(true)
     panStart.current = {
       x: event.clientX,
@@ -312,7 +331,7 @@ export function PdfViewport({
         <div className="empty-state">
           <img
             className="brand-logo"
-            src="/markstratum-logo.png"
+            src="./markstratum-logo.png"
             alt="MarkStratum"
             width={360}
             height={196}
@@ -347,15 +366,23 @@ export function PdfViewport({
             }}
           >
             <div className="drawing-pages">
-              {pageLayouts.map((layout) => (
-                <PageSlot
-                  key={layout.index}
-                  width={layout.width}
-                  height={layout.height}
-                  label={`Page ${layout.index + 1}`}
-                  image={imageForScale(images[layout.index], scale)}
-                />
-              ))}
+              {pageLayouts.map((layout) => {
+                const page = document.pages[layout.index]
+                return (
+                  <PageSlot
+                    key={layout.index}
+                    width={layout.width}
+                    height={layout.height}
+                    label={`Page ${layout.index + 1}`}
+                    image={imageForScale(images[layout.index], scale)}
+                    formFields={formFields}
+                    pageIndex={layout.index}
+                    pageHeightPts={page?.height ?? layout.height / scale}
+                    scale={scale}
+                    onFormValuesChange={onFormValuesChange}
+                  />
+                )
+              })}
             </div>
           </div>
         </div>
@@ -373,15 +400,23 @@ export function PdfViewport({
     <div className="viewport-shell" onDragOver={onDragOver} onDrop={onDrop}>
       <div ref={scrollRef} className="document-viewport" onScroll={onDocumentScroll}>
         <div className="document-stage" style={{ width: stageWidth + 32 }}>
-          {pageLayouts.map((layout) => (
-            <PageSlot
-              key={layout.index}
-              width={layout.width}
-              height={layout.height}
-              label={`Page ${layout.index + 1}`}
-              image={imageForScale(images[layout.index], scale)}
-            />
-          ))}
+          {pageLayouts.map((layout) => {
+            const page = document.pages[layout.index]
+            return (
+              <PageSlot
+                key={layout.index}
+                width={layout.width}
+                height={layout.height}
+                label={`Page ${layout.index + 1}`}
+                image={imageForScale(images[layout.index], scale)}
+                formFields={formFields}
+                pageIndex={layout.index}
+                pageHeightPts={page?.height ?? layout.height / scale}
+                scale={scale}
+                onFormValuesChange={onFormValuesChange}
+              />
+            )
+          })}
         </div>
       </div>
     </div>
@@ -400,11 +435,21 @@ function PageSlot({
   height,
   label,
   image,
+  formFields = [],
+  pageIndex = 0,
+  pageHeightPts = 0,
+  scale = 1,
+  onFormValuesChange,
 }: {
   width: number
   height: number
   label: string
   image?: PageImage
+  formFields?: FormFieldInfo[]
+  pageIndex?: number
+  pageHeightPts?: number
+  scale?: number
+  onFormValuesChange?: (updates: FormValueUpdate[]) => void
 }) {
   return (
     <div className="page-slot" style={{ width, height }}>
@@ -413,6 +458,15 @@ function PageSlot({
       ) : (
         <div className="page-placeholder">{label}</div>
       )}
+      {onFormValuesChange ? (
+        <FormFieldOverlays
+          fields={formFields}
+          pageIndex={pageIndex}
+          pageHeightPts={pageHeightPts}
+          scale={scale}
+          onValuesChange={onFormValuesChange}
+        />
+      ) : null}
     </div>
   )
 }

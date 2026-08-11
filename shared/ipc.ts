@@ -16,6 +16,7 @@ export type DocumentInfo = {
   fileName: string
   pageCount: number
   pages: PageInfo[]
+  dirty?: boolean
 }
 
 export type BookmarkActionType =
@@ -34,6 +35,49 @@ export type BookmarkNode = {
   url?: string
   children?: BookmarkNode[]
 }
+
+export type FormFieldType =
+  | 'textField'
+  | 'checkbox'
+  | 'radioButton'
+  | 'comboBox'
+  | 'listBox'
+
+export type FormFieldBounds = {
+  left: number
+  bottom: number
+  right: number
+  top: number
+}
+
+export type FormFieldOption = {
+  label: string
+  isSelected: boolean
+}
+
+export type FormFieldInfo = {
+  pageIndex: number
+  name: string
+  type: FormFieldType
+  value: string
+  isChecked: boolean
+  exportValue?: string
+  alternateName?: string
+  flags: number
+  bounds?: FormFieldBounds
+  options?: FormFieldOption[]
+  readOnly: boolean
+  multiline: boolean
+}
+
+export type FormValueUpdate = {
+  name: string
+  value: string
+}
+
+export type SetFormValuesResult =
+  | { ok: true; document: DocumentInfo }
+  | { ok: false; error: string }
 
 export type OpenDocumentResult =
   | { ok: true; document: DocumentInfo }
@@ -70,8 +114,11 @@ export const IpcChannels = {
   close: 'pdf:close',
   renderPage: 'pdf:renderPage',
   getBookmarks: 'pdf:getBookmarks',
+  getFormFields: 'pdf:getFormFields',
+  setFormValues: 'pdf:setFormValues',
   save: 'pdf:save',
   saveAs: 'pdf:saveAs',
+  takePendingOpenPath: 'app:takePendingOpenPath',
   menuOpen: 'menu:open',
   menuClose: 'menu:close',
   menuSave: 'menu:save',
@@ -82,3 +129,12 @@ export const IpcChannels = {
 } as const
 
 export type MenuZoomCommand = 'in' | 'out' | 'fitWidth' | 'fitPage' | 'actual'
+
+/** PDF AcroForm field flag bits (1-based in the PDF spec). */
+export const FormFieldFlags = {
+  readOnly: 1 << 0,
+  required: 1 << 1,
+  noExport: 1 << 2,
+  multiline: 1 << 12,
+  password: 1 << 13,
+} as const

@@ -5,10 +5,18 @@ import {
   loadDocument,
   PDFiumPasswordError,
   type Bookmark,
+  type FormField,
   type PDFiumDocument,
   type PDFiumPage,
 } from 'pdfium-native'
-import type { BookmarkNode, PageInfo, SizePts } from '../../../shared/ipc'
+import {
+  FormFieldFlags,
+  type BookmarkNode,
+  type FormFieldInfo,
+  type FormFieldType,
+  type PageInfo,
+  type SizePts,
+} from '../../../shared/ipc'
 
 export type PdfDocumentHandle = {
   id: string
@@ -38,17 +46,21 @@ const DEFAULT_PAGE_HEIGHT = 792
 
 export interface PdfEngine {
   open(path: string, password?: string): Promise<PdfDocumentHandle>
+  reopen(doc: PdfDocumentHandle, path: string, password?: string): Promise<void>
+  /** Destroy the native document to release file locks, keeping the handle id. */
+  release(doc: PdfDocumentHandle): Promise<void>
   getPageCount(doc: PdfDocumentHandle): number
   getPageSize(doc: PdfDocumentHandle, pageIndex: number): Promise<SizePts>
   getPages(doc: PdfDocumentHandle): Promise<PageInfo[]>
   getBookmarks(doc: PdfDocumentHandle): Promise<BookmarkNode[]>
+  getFormFields(doc: PdfDocumentHandle, pageIndex: number): Promise<FormFieldInfo[]>
   renderPage(doc: PdfDocumentHandle, req: EngineRenderRequest): Promise<EngineRenderedPage>
   close(doc: PdfDocumentHandle): Promise<void>
 }
 
 type InternalDoc = {
   handle: PdfDocumentHandle
-  native: PDFiumDocument
+  native: PDFiumDocument | null
 }
 
 function isPasswordError(error: unknown): boolean {
@@ -82,12 +94,41 @@ export class PdfiumEngine implements PdfEngine {
     }
   }
 
+  async reopen(doc: PdfDocumentHandle, filePath: string, password?: string): Promise<void> {
+    const internal = this.docs.get(doc.id)
+    if (internal?.native) {
+      internal.native.destroy()
+      internal.native = null
+    }
+    try {
+      const native = await loadDocument(filePath, password)
+      doc.path = filePath
+      this.docs.set(doc.id, { handle: doc, native })
+    } catch (error) {
+      if (isPasswordError(error)) {
+        const passwordError = new Error('PASSWORD_REQUIRED')
+        passwordError.name = 'PasswordRequiredError'
+        throw passwordError
+      }
+      throw error
+    }
+  }
+
+  async release(doc: PdfDocumentHandle): Promise<void> {
+    const internal = this.docs.get(doc.id)
+    if (!internal?.native) {
+      return
+    }
+    internal.native.destroy()
+    internal.native = null
+  }
+
   getPageCount(doc: PdfDocumentHandle): number {
-    return this.requireDoc(doc).native.pageCount
+    return this.requireNative(doc).pageCount
   }
 
   async getPageSize(doc: PdfDocumentHandle, pageIndex: number): Promise<SizePts> {
-    const page = await this.requireDoc(doc).native.getPage(pageIndex)
+    const page = await this.requireNative(doc).getPage(pageIndex)
     try {
       return { width: page.width, height: page.height }
     } finally {
@@ -96,7 +137,7 @@ export class PdfiumEngine implements PdfEngine {
   }
 
   async getPages(doc: PdfDocumentHandle): Promise<PageInfo[]> {
-    const native = this.requireDoc(doc).native
+    const native = this.requireNative(doc)
     const pageCount = native.pageCount
     if (pageCount <= 0) {
       return []
@@ -124,15 +165,27 @@ export class PdfiumEngine implements PdfEngine {
   }
 
   async getBookmarks(doc: PdfDocumentHandle): Promise<BookmarkNode[]> {
-    const bookmarks = await this.requireDoc(doc).native.getBookmarks()
+    const bookmarks = await this.requireNative(doc).getBookmarks()
     return bookmarks.map(toBookmarkNode)
+  }
+
+  async getFormFields(doc: PdfDocumentHandle, pageIndex: number): Promise<FormFieldInfo[]> {
+    const page = await this.requireNative(doc).getPage(pageIndex)
+    try {
+      const fields = await page.getFormFields()
+      return fields
+        .map((field) => toFormFieldInfo(field, pageIndex))
+        .filter((field): field is FormFieldInfo => field !== null)
+    } finally {
+      page.close()
+    }
   }
 
   async renderPage(
     doc: PdfDocumentHandle,
     req: EngineRenderRequest,
   ): Promise<EngineRenderedPage> {
-    const page = await this.requireDoc(doc).native.getPage(req.pageIndex)
+    const page = await this.requireNative(doc).getPage(req.pageIndex)
     try {
       const scale = clampScale(req.scale, page)
       const tempDir = mkdtempSync(join(tmpdir(), 'markstratum-render-'))
@@ -172,16 +225,16 @@ export class PdfiumEngine implements PdfEngine {
     if (!internal) {
       return
     }
-    internal.native.destroy()
+    internal.native?.destroy()
     this.docs.delete(doc.id)
   }
 
-  private requireDoc(doc: PdfDocumentHandle): InternalDoc {
+  private requireNative(doc: PdfDocumentHandle): PDFiumDocument {
     const internal = this.docs.get(doc.id)
-    if (!internal) {
+    if (!internal?.native) {
       throw new Error(`Document not open: ${doc.id}`)
     }
-    return internal
+    return internal.native
   }
 }
 
@@ -201,6 +254,46 @@ function toBookmarkNode(bookmark: Bookmark): BookmarkNode {
     actionType: bookmark.actionType,
     url: bookmark.url,
     children: bookmark.children?.map(toBookmarkNode),
+  }
+}
+
+const CORE_FORM_TYPES = new Set<FormFieldType>([
+  'textField',
+  'checkbox',
+  'radioButton',
+  'comboBox',
+  'listBox',
+])
+
+function toFormFieldInfo(field: FormField, pageIndex: number): FormFieldInfo | null {
+  if (!CORE_FORM_TYPES.has(field.type as FormFieldType)) {
+    return null
+  }
+  const type = field.type as FormFieldType
+  const flags = Number(field.flags) || 0
+  return {
+    pageIndex,
+    name: field.name,
+    type,
+    value: field.value ?? '',
+    isChecked: Boolean(field.isChecked),
+    exportValue: field.exportValue,
+    alternateName: field.alternateName,
+    flags,
+    bounds: field.bounds
+      ? {
+          left: field.bounds.left,
+          bottom: field.bounds.bottom,
+          right: field.bounds.right,
+          top: field.bounds.top,
+        }
+      : undefined,
+    options: field.options?.map((option) => ({
+      label: option.label,
+      isSelected: option.isSelected,
+    })),
+    readOnly: (flags & FormFieldFlags.readOnly) !== 0,
+    multiline: type === 'textField' && (flags & FormFieldFlags.multiline) !== 0,
   }
 }
 

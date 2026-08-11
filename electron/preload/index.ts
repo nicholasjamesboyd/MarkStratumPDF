@@ -2,11 +2,14 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
   IpcChannels,
   type BookmarkNode,
+  type FormFieldInfo,
+  type FormValueUpdate,
   type MenuZoomCommand,
   type OpenDocumentResult,
   type RenderedPage,
   type RenderPageRequest,
   type SaveDocumentResult,
+  type SetFormValuesResult,
   type ViewMode,
 } from '../../shared/ipc'
 
@@ -16,8 +19,14 @@ export type MarkStratumApi = {
   closeDocument: (documentId: string) => Promise<void>
   renderPage: (req: RenderPageRequest) => Promise<RenderedPage>
   getBookmarks: (documentId: string) => Promise<BookmarkNode[]>
+  getFormFields: (documentId: string) => Promise<FormFieldInfo[]>
+  setFormValues: (
+    documentId: string,
+    updates: FormValueUpdate[],
+  ) => Promise<SetFormValuesResult>
   saveDocument: (documentId: string) => Promise<SaveDocumentResult>
   saveDocumentAs: (documentId: string) => Promise<SaveDocumentResult | null>
+  takePendingOpenPath: () => Promise<string | null>
   getPathForFile: (file: File) => string
   onMenuOpen: (handler: () => void) => () => void
   onMenuClose: (handler: () => void) => () => void
@@ -50,8 +59,12 @@ const api: MarkStratumApi = {
   closeDocument: (documentId) => ipcRenderer.invoke(IpcChannels.close, documentId),
   renderPage: (req) => ipcRenderer.invoke(IpcChannels.renderPage, req),
   getBookmarks: (documentId) => ipcRenderer.invoke(IpcChannels.getBookmarks, documentId),
+  getFormFields: (documentId) => ipcRenderer.invoke(IpcChannels.getFormFields, documentId),
+  setFormValues: (documentId, updates) =>
+    ipcRenderer.invoke(IpcChannels.setFormValues, documentId, updates),
   saveDocument: (documentId) => ipcRenderer.invoke(IpcChannels.save, documentId),
   saveDocumentAs: (documentId) => ipcRenderer.invoke(IpcChannels.saveAs, documentId),
+  takePendingOpenPath: () => ipcRenderer.invoke(IpcChannels.takePendingOpenPath),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   onMenuOpen: (handler) => subscribe(IpcChannels.menuOpen, handler),
   onMenuClose: (handler) => subscribe(IpcChannels.menuClose, handler),
