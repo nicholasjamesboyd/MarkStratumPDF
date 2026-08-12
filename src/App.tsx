@@ -41,6 +41,7 @@ export default function App() {
     setSplitSizes,
     setFocusedPane,
     setFormValuesForDocument,
+    applyLayersChanged,
   } = useWorkspace({ onDocumentOpened: recordOpen })
 
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 })
@@ -245,6 +246,7 @@ export default function App() {
         viewportWidth={width}
         formFields={tab.formFields}
         formRevision={tab.formRevision}
+        layersRevision={tab.layersRevision}
         onFormValuesChange={(updates) => {
           void setFormValuesForDocument(tab.document.documentId, updates)
         }}
@@ -271,6 +273,7 @@ export default function App() {
           }}
           onClearRecent={clearRecent}
           documentId={focusedTab?.document.documentId ?? null}
+          layersRevision={focusedTab?.layersRevision ?? 0}
           onGoToBookmarkPage={(pageIndex) => {
             if (!focusedTabId || !focusedTab) {
               return
@@ -279,6 +282,8 @@ export default function App() {
             const nextIndex = Math.min(maxIndex, Math.max(0, pageIndex))
             updateTab(focusedTabId, { pageIndex: nextIndex })
           }}
+          onLayersChanged={applyLayersChanged}
+          onError={setError}
         />
 
         <div className="app-main">

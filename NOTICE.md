@@ -13,3 +13,5 @@ Prebuilt PDFium binaries used by pdfium-native come from [bblanchon/pdfium-binar
 ## Other dependencies
 
 Runtime and build dependencies are listed in `package.json`. Review each package license before redistributing binaries.
+
+Layer (OCG) editing follows the PDF Optional Content model. [JPDFium](https://github.com/Stirling-Tools/JPDFium) (MIT) was used as a behavioral reference for list / visibility / create / delete; MarkStratum implements its own `pdf-lib`-based service rather than depending on that project.

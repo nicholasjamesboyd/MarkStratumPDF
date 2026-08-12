@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import type { DocumentInfo, LayerInfo } from '../../shared/ipc'
 import type { RecentFileEntry } from '../hooks/useRecentFiles'
 import { BookmarksPanel } from './panels/BookmarksPanel'
 import { LayersPanel } from './panels/LayersPanel'
@@ -18,7 +19,14 @@ type ToolShelfProps = {
   onOpenRecent: (filePath: string) => void
   onClearRecent: () => void
   documentId: string | null
+  layersRevision: number
   onGoToBookmarkPage: (pageIndex: number) => void
+  onLayersChanged: (result: {
+    document: DocumentInfo
+    layers: LayerInfo[]
+    layersRevision: number
+  }) => void
+  onError: (message: string) => void
 }
 
 function ClockIcon() {
@@ -95,7 +103,10 @@ export function ToolShelf({
   onOpenRecent,
   onClearRecent,
   documentId,
+  layersRevision,
   onGoToBookmarkPage,
+  onLayersChanged,
+  onError,
 }: ToolShelfProps) {
   const [activeToolId, setActiveToolId] = useState<ToolId | null>(null)
 
@@ -125,10 +136,26 @@ export function ToolShelf({
         id: 'layers',
         label: 'Layers',
         icon: <LayersIcon />,
-        renderPanel: () => <LayersPanel />,
+        renderPanel: () => (
+          <LayersPanel
+            documentId={documentId}
+            layersRevision={layersRevision}
+            onLayersChanged={onLayersChanged}
+            onError={onError}
+          />
+        ),
       },
     ],
-    [documentId, onClearRecent, onGoToBookmarkPage, onOpenRecent, recentEntries],
+    [
+      documentId,
+      layersRevision,
+      onClearRecent,
+      onError,
+      onGoToBookmarkPage,
+      onLayersChanged,
+      onOpenRecent,
+      recentEntries,
+    ],
   )
 
   const activeTool = tools.find((tool) => tool.id === activeToolId) ?? null

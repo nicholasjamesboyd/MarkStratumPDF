@@ -199,6 +199,38 @@ function registerIpc() {
     },
   )
 
+  ipcMain.handle(IpcChannels.getLayers, async (_event, documentId: string) => {
+    return session.getLayers(documentId)
+  })
+
+  ipcMain.handle(
+    IpcChannels.setLayerVisibility,
+    async (_event, documentId: string, layerId: string, visible: boolean) => {
+      return session.setLayerVisibility(documentId, layerId, visible)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.createLayer,
+    async (_event, documentId: string, name: string, visible?: boolean) => {
+      return session.createLayer(documentId, name, visible ?? true)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.renameLayer,
+    async (_event, documentId: string, layerId: string, name: string) => {
+      return session.renameLayer(documentId, layerId, name)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.deleteLayer,
+    async (_event, documentId: string, layerId: string) => {
+      return session.deleteLayer(documentId, layerId)
+    },
+  )
+
   ipcMain.handle(IpcChannels.save, async (_event, documentId: string): Promise<SaveDocumentResult> => {
     return session.save(documentId)
   })

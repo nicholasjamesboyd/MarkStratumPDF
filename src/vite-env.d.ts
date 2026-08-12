@@ -4,6 +4,8 @@ import type {
   BookmarkNode,
   FormFieldInfo,
   FormValueUpdate,
+  LayerInfo,
+  LayerMutationResult,
   MenuZoomCommand,
   OpenDocumentResult,
   RenderedPage,
@@ -24,6 +26,23 @@ type MarkStratumApi = {
     documentId: string,
     updates: FormValueUpdate[],
   ) => Promise<SetFormValuesResult>
+  getLayers: (documentId: string) => Promise<LayerInfo[]>
+  setLayerVisibility: (
+    documentId: string,
+    layerId: string,
+    visible: boolean,
+  ) => Promise<LayerMutationResult>
+  createLayer: (
+    documentId: string,
+    name: string,
+    visible?: boolean,
+  ) => Promise<LayerMutationResult>
+  renameLayer: (
+    documentId: string,
+    layerId: string,
+    name: string,
+  ) => Promise<LayerMutationResult>
+  deleteLayer: (documentId: string, layerId: string) => Promise<LayerMutationResult>
   saveDocument: (documentId: string) => Promise<SaveDocumentResult>
   saveDocumentAs: (documentId: string) => Promise<SaveDocumentResult | null>
   takePendingOpenPath: () => Promise<string | null>

@@ -88,6 +88,19 @@ export type SaveDocumentResult =
   | { ok: true; document: DocumentInfo }
   | { ok: false; error: string }
 
+export type LayerInfo = {
+  id: string
+  name: string
+  visible: boolean
+  locked?: boolean
+  depth: number
+  children?: LayerInfo[]
+}
+
+export type LayerMutationResult =
+  | { ok: true; document: DocumentInfo; layers: LayerInfo[]; layersRevision: number }
+  | { ok: false; error: string }
+
 export type RenderPageRequest = {
   documentId: string
   pageIndex: number
@@ -116,6 +129,11 @@ export const IpcChannels = {
   getBookmarks: 'pdf:getBookmarks',
   getFormFields: 'pdf:getFormFields',
   setFormValues: 'pdf:setFormValues',
+  getLayers: 'pdf:getLayers',
+  setLayerVisibility: 'pdf:setLayerVisibility',
+  createLayer: 'pdf:createLayer',
+  renameLayer: 'pdf:renameLayer',
+  deleteLayer: 'pdf:deleteLayer',
   save: 'pdf:save',
   saveAs: 'pdf:saveAs',
   takePendingOpenPath: 'app:takePendingOpenPath',

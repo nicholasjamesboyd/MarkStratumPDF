@@ -4,20 +4,24 @@ Free, open-source PDF viewer (and future markup) desktop app. MIT licensed.
 
 Repository: https://github.com/nicholasjamesboyd/MarkStratumPDF
 
-MarkStratum aims at document and drawing workflows: efficient multi-page viewing, pan/zoom for large sheets, and later markups, measure, stamps, and PDF editing. Compatibility with other PDF programs is a design goal.
+MarkStratum targets document and drawing workflows: multi-page viewing, pan/zoom for large sheets, fillable forms, and later markups, measure, stamps, and PDF editing. Compatibility with other PDF programs is a design goal.
 
-## Current status (MVP)
+## Current status
 
-This first release is a **PDF viewer only**:
+Beyond the original viewer MVP, the app now includes a multi-document shell, fillable forms, and OCG layer controls:
 
-- Open local PDFs (dialog, drag-and-drop, or OS open)
+- Open local PDFs (dialog, drag-and-drop, or OS open-with / default app)
+- Multi-tab workspace, recent files, bookmarks panel, and horizontal split view
 - Document mode: continuous vertical scroll
 - Drawing mode: pan/drag and wheel zoom toward the cursor
 - Visible-page rendering via PDFium (not PDF.js)
 - Zoom controls: fit width, fit page, percent
 - Password-protected PDFs
+- Fillable AcroForm fields: text, checkbox, radio, dropdown, and list
+- Save and Save As write filled values while keeping the form editable
+- Optional Content Groups (layers): list, toggle visibility, create, rename, and delete; changes re-render via PDFium and persist on Save
 
-Not in this MVP yet: tabs, markups, measure, stamps, page editing, flatten, forms, OCR, or layers.
+Not built yet: markups, measure, stamps, page editing/combine, flatten, signature fields, or OCR.
 
 ## Requirements
 
@@ -45,13 +49,13 @@ Useful scripts:
 
 ## Architecture
 
-- **Electron main:** owns PDFium (`pdfium-native`), document session, LRU page cache, menus, file dialogs
+- **Electron main:** owns PDFium (`pdfium-native`), document session, LRU page cache, menus, file dialogs, and form save via `pdf-lib`
 - **Preload:** exposes a narrow `window.markStratum` API
-- **Renderer (React):** viewport, toolbar, status bar
+- **Renderer (React):** tabs, tool shelf, viewport with form overlays, toolbar, status bar
 
-PDF access goes through a `PdfEngine` interface so the renderer never loads native code, and the engine can later grow tiled rendering without rewriting the UI.
+PDF access goes through a `PdfEngine` interface so the renderer never loads native code. Field values are read with PDFium and written with `pdf-lib` so filled forms stay interactive in other viewers. Layer (OCG) visibility is edited in `OCProperties` with `pdf-lib`, then the working PDF is reloaded into PDFium so renders match.
 
-For the overall product plan, MVP status, and next phases, see [docs/ROADMAP.md](docs/ROADMAP.md).
+For the overall product plan and later phases, see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 

@@ -4,6 +4,8 @@ import {
   type BookmarkNode,
   type FormFieldInfo,
   type FormValueUpdate,
+  type LayerInfo,
+  type LayerMutationResult,
   type MenuZoomCommand,
   type OpenDocumentResult,
   type RenderedPage,
@@ -24,6 +26,23 @@ export type MarkStratumApi = {
     documentId: string,
     updates: FormValueUpdate[],
   ) => Promise<SetFormValuesResult>
+  getLayers: (documentId: string) => Promise<LayerInfo[]>
+  setLayerVisibility: (
+    documentId: string,
+    layerId: string,
+    visible: boolean,
+  ) => Promise<LayerMutationResult>
+  createLayer: (
+    documentId: string,
+    name: string,
+    visible?: boolean,
+  ) => Promise<LayerMutationResult>
+  renameLayer: (
+    documentId: string,
+    layerId: string,
+    name: string,
+  ) => Promise<LayerMutationResult>
+  deleteLayer: (documentId: string, layerId: string) => Promise<LayerMutationResult>
   saveDocument: (documentId: string) => Promise<SaveDocumentResult>
   saveDocumentAs: (documentId: string) => Promise<SaveDocumentResult | null>
   takePendingOpenPath: () => Promise<string | null>
@@ -62,6 +81,15 @@ const api: MarkStratumApi = {
   getFormFields: (documentId) => ipcRenderer.invoke(IpcChannels.getFormFields, documentId),
   setFormValues: (documentId, updates) =>
     ipcRenderer.invoke(IpcChannels.setFormValues, documentId, updates),
+  getLayers: (documentId) => ipcRenderer.invoke(IpcChannels.getLayers, documentId),
+  setLayerVisibility: (documentId, layerId, visible) =>
+    ipcRenderer.invoke(IpcChannels.setLayerVisibility, documentId, layerId, visible),
+  createLayer: (documentId, name, visible) =>
+    ipcRenderer.invoke(IpcChannels.createLayer, documentId, name, visible),
+  renameLayer: (documentId, layerId, name) =>
+    ipcRenderer.invoke(IpcChannels.renameLayer, documentId, layerId, name),
+  deleteLayer: (documentId, layerId) =>
+    ipcRenderer.invoke(IpcChannels.deleteLayer, documentId, layerId),
   saveDocument: (documentId) => ipcRenderer.invoke(IpcChannels.save, documentId),
   saveDocumentAs: (documentId) => ipcRenderer.invoke(IpcChannels.saveAs, documentId),
   takePendingOpenPath: () => ipcRenderer.invoke(IpcChannels.takePendingOpenPath),

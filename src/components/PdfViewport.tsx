@@ -33,6 +33,7 @@ type PdfViewportProps = {
   viewportWidth: number
   formFields?: FormFieldInfo[]
   formRevision?: number
+  layersRevision?: number
   onFormValuesChange?: (updates: FormValueUpdate[]) => void
 }
 
@@ -56,6 +57,7 @@ export function PdfViewport({
   viewportWidth,
   formFields = [],
   formRevision = 0,
+  layersRevision = 0,
   onFormValuesChange,
 }: PdfViewportProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -106,12 +108,12 @@ export function PdfViewport({
   }, [documentPath])
 
   useEffect(() => {
-    if (formRevision <= 0) {
+    if (formRevision <= 0 && layersRevision <= 0) {
       return
     }
     setImages({})
     renderGen.current += 1
-  }, [formRevision])
+  }, [formRevision, layersRevision])
 
   useEffect(() => {
     renderGen.current += 1

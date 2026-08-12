@@ -46,7 +46,7 @@ flowchart TB
 2. **Markups:** highlight, pen, shapes, text; write standard PDF annotations for compatibility
 3. **Measure and stamp:** calibrated scale, length/area, stamp library
 4. **Page ops:** reorder, extract, insert, combine, drag pages between docs
-5. **Flatten / forms / layers:** annotation flatten, AcroForm fill, OCG layer visibility
+5. **Flatten / forms / layers:** annotation flatten, AcroForm fill, OCG layer visibility (list / toggle / create / rename / delete; assign new markups to layers later)
 6. **OCR / rewrite:** Tesseract (Apache-2.0) for text layer; content object edit later
 
 ## Viewer MVP (completed)
@@ -67,7 +67,9 @@ flowchart TB
 
 ### Out of MVP (still planned above)
 
-- Tabs, markups, measure, stamps, edit/combine, flatten, forms, OCR, layers, cloud/sync
+- Tabs, markups, measure, stamps, edit/combine, flatten, forms, OCR, cloud/sync
+
+OCG layer list/toggle/create/rename/delete is implemented in the app shell (mutate `OCProperties`, reload into PDFium). Assigning new markups to an active layer waits on the markup phase.
 
 ### Known MVP follow-ups (before or alongside phase 1)
 
@@ -97,6 +99,8 @@ MarkStratumPDF/
         pdfEngine.ts        # PdfEngine interface + pdfium-native adapter
         pageCache.ts        # LRU rendered-page cache
         documentSession.ts  # open/close, page meta, render jobs
+        formWriter.ts       # AcroForm value persistence via pdf-lib
+        ocgService.ts       # OCG layer list/mutate via pdf-lib
     preload/
       index.ts              # window.markStratum bridge
   src/

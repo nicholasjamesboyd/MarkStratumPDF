@@ -1,11 +1,13 @@
 import path from 'node:path'
-import { copyFile, rename, unlink } from 'node:fs/promises'
+import { copyFile, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import type {
   BookmarkNode,
   DocumentInfo,
   FormFieldInfo,
   FormValueUpdate,
+  LayerInfo,
+  LayerMutationResult,
   OpenDocumentResult,
   RenderedPage,
   RenderPageRequest,
@@ -13,6 +15,13 @@ import type {
   SetFormValuesResult,
 } from '../../../shared/ipc'
 import { writeFormValues } from './formWriter'
+import {
+  createLayerInBytes,
+  deleteLayerInBytes,
+  listLayersFromBytes,
+  renameLayerInBytes,
+  setLayerVisibilityInBytes,
+} from './ocgService'
 import { LruCache, makePageCacheKey } from './pageCache'
 import {
   PdfiumEngine,
@@ -31,6 +40,9 @@ type OpenDocument = {
   formValues: Map<string, string>
   dirty: boolean
   password?: string
+  /** Temp PDF with pending layer edits; PDFium renders from this when set. */
+  workPath?: string
+  layersRevision: number
 }
 
 export class DocumentSession {
@@ -86,6 +98,7 @@ export class DocumentSession {
         formValues,
         dirty: false,
         password,
+        layersRevision: 0,
       })
       return { ok: true, document: toDocumentInfo(this.documents.get(handle.id)!) }
     } catch (error) {
@@ -195,6 +208,118 @@ export class DocumentSession {
     return { ok: true, document: toDocumentInfo(entry) }
   }
 
+  async getLayers(documentId: string): Promise<LayerInfo[]> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      throw new Error(`No document open: ${documentId}`)
+    }
+    const bytes = await readFile(renderPath(entry))
+    return listLayersFromBytes(bytes)
+  }
+
+  async setLayerVisibility(
+    documentId: string,
+    layerId: string,
+    visible: boolean,
+  ): Promise<LayerMutationResult> {
+    if (layerId.startsWith('group:')) {
+      return { ok: false, error: 'Layer groups cannot be toggled directly.' }
+    }
+    return this.mutateLayers(documentId, (bytes) =>
+      setLayerVisibilityInBytes(bytes, layerId, visible),
+    )
+  }
+
+  async createLayer(
+    documentId: string,
+    name: string,
+    visible = true,
+  ): Promise<LayerMutationResult> {
+    return this.mutateLayers(documentId, async (bytes) => {
+      const result = await createLayerInBytes(bytes, name, visible)
+      return result.bytes
+    })
+  }
+
+  async renameLayer(
+    documentId: string,
+    layerId: string,
+    name: string,
+  ): Promise<LayerMutationResult> {
+    return this.mutateLayers(documentId, (bytes) => renameLayerInBytes(bytes, layerId, name))
+  }
+
+  async deleteLayer(documentId: string, layerId: string): Promise<LayerMutationResult> {
+    if (layerId.startsWith('group:')) {
+      return { ok: false, error: 'Layer groups cannot be deleted.' }
+    }
+    return this.mutateLayers(documentId, (bytes) => deleteLayerInBytes(bytes, layerId))
+  }
+
+  private async mutateLayers(
+    documentId: string,
+    mutate: (bytes: Uint8Array) => Promise<Uint8Array>,
+  ): Promise<LayerMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+
+    try {
+      const sourceBytes = await readFile(renderPath(entry))
+      const nextBytes = await mutate(sourceBytes)
+      const nextWorkPath = path.join(
+        path.dirname(entry.info.path),
+        `.markstratum-layers-${randomBytes(8).toString('hex')}.pdf`,
+      )
+      await writeFile(nextWorkPath, nextBytes)
+
+      const previousWorkPath = entry.workPath
+      await this.engine.release(entry.handle)
+      try {
+        await this.engine.reopen(entry.handle, nextWorkPath, entry.password)
+      } catch (error) {
+        try {
+          await this.engine.reopen(entry.handle, renderPath(entry), entry.password)
+        } catch {
+          // ignore secondary failure
+        }
+        try {
+          await unlink(nextWorkPath)
+        } catch {
+          // ignore
+        }
+        throw error
+      }
+
+      entry.workPath = nextWorkPath
+      entry.dirty = true
+      entry.info = { ...entry.info, dirty: true }
+      entry.layersRevision += 1
+      entry.cache.clear()
+      entry.inflight.clear()
+
+      if (previousWorkPath && previousWorkPath !== nextWorkPath) {
+        try {
+          await unlink(previousWorkPath)
+        } catch {
+          // ignore stale temp cleanup
+        }
+      }
+
+      const layers = await listLayersFromBytes(nextBytes)
+      return {
+        ok: true,
+        document: toDocumentInfo(entry),
+        layers,
+        layersRevision: entry.layersRevision,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
   async save(documentId: string): Promise<SaveDocumentResult> {
     const entry = this.documents.get(documentId)
     if (!entry) {
@@ -245,19 +370,21 @@ export class DocumentSession {
   }
 
   /**
-   * Write filled values to dest. Releases the PDFium file lock before replacing
-   * so Windows can overwrite the open path.
+   * Write filled values (and any pending layer work file) to dest. Releases the
+   * PDFium file lock before replacing so Windows can overwrite the open path.
    */
   private async persistDirtyValues(entry: OpenDocument, destPath: string): Promise<void> {
     const sourcePath = entry.info.path
     const values = Object.fromEntries(entry.formValues)
+    const readPath = renderPath(entry)
     const tempPath = path.join(
       path.dirname(destPath),
       `.markstratum-save-${randomBytes(8).toString('hex')}.pdf`,
     )
+    const previousWorkPath = entry.workPath
 
     try {
-      await writeFormValues(sourcePath, tempPath, values)
+      await writeFormValues(readPath, tempPath, values)
       await this.engine.release(entry.handle)
       await replaceFile(tempPath, destPath)
       await this.engine.reopen(entry.handle, destPath, entry.password)
@@ -268,9 +395,18 @@ export class DocumentSession {
         dirty: false,
       }
       entry.dirty = false
+      entry.workPath = undefined
       entry.cache.clear()
       entry.inflight.clear()
       entry.formValues = await this.loadFormBaselines(entry.handle, entry.info.pageCount)
+
+      if (previousWorkPath) {
+        try {
+          await unlink(previousWorkPath)
+        } catch {
+          // ignore
+        }
+      }
     } catch (error) {
       try {
         await unlink(tempPath)
@@ -281,9 +417,17 @@ export class DocumentSession {
         throw error
       }
       try {
-        await this.engine.reopen(entry.handle, sourcePath, entry.password)
+        await this.engine.reopen(entry.handle, renderPath(entry), entry.password)
       } catch {
         // ignore secondary failure; surface the original error
+      }
+      // restore sourcePath reopen fallback if work path is gone
+      if (!entry.workPath) {
+        try {
+          await this.engine.reopen(entry.handle, sourcePath, entry.password)
+        } catch {
+          // ignore
+        }
       }
       throw error
     }
@@ -298,6 +442,7 @@ export class DocumentSession {
       dirty: false,
     }
     entry.dirty = false
+    entry.workPath = undefined
     entry.cache.clear()
     entry.inflight.clear()
     entry.formValues = await this.loadFormBaselines(entry.handle, entry.info.pageCount)
@@ -341,7 +486,15 @@ export class DocumentSession {
     this.documents.delete(documentId)
     entry.cache.clear()
     entry.inflight.clear()
+    const workPath = entry.workPath
     await this.engine.close(entry.handle)
+    if (workPath) {
+      try {
+        await unlink(workPath)
+      } catch {
+        // ignore
+      }
+    }
   }
 }
 
@@ -382,6 +535,10 @@ function toDocumentInfo(entry: OpenDocument): DocumentInfo {
     ...entry.info,
     dirty: entry.dirty,
   }
+}
+
+function renderPath(entry: OpenDocument): string {
+  return entry.workPath ?? entry.info.path
 }
 
 function toWirePage(rendered: EngineRenderedPage, requestId: string): RenderedPage {

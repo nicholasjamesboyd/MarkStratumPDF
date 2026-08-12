@@ -17,6 +17,7 @@ export type TabState = {
   viewMode: ViewMode
   formFields: FormFieldInfo[]
   formRevision: number
+  layersRevision: number
 }
 
 export type WorkspaceLayout =
@@ -128,6 +129,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
         viewMode: 'document',
         formFields: [],
         formRevision: 0,
+        layersRevision: 0,
       }
       setTabs((prev) => [...prev, next])
       setLayout((current) => {
@@ -257,6 +259,26 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
       }
     },
     [applyDocumentInfo],
+  )
+
+  const applyLayersChanged = useCallback(
+    (result: {
+      document: DocumentInfo
+      layersRevision: number
+    }) => {
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === result.document.documentId
+            ? {
+                ...tab,
+                document: result.document,
+                layersRevision: result.layersRevision,
+              }
+            : tab,
+        ),
+      )
+    },
+    [],
   )
 
   const saveFocusedDocument = useCallback(async () => {
@@ -458,6 +480,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     saveFocusedDocument,
     saveFocusedDocumentAs,
     setFormValuesForDocument,
+    applyLayersChanged,
     toggleSplit,
     setSplitSizes,
     setFocusedPane,
