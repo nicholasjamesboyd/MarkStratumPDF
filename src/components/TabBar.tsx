@@ -1,4 +1,5 @@
 import { useState, type DragEvent } from 'react'
+import { PageDragMime, TabDragMime } from '../../shared/ipc'
 import type { TabState } from '../hooks/useWorkspace'
 
 type TabBarProps = {
@@ -26,12 +27,22 @@ export function TabBar({
   }
 
   const onDragStart = (event: DragEvent<HTMLButtonElement>, index: number) => {
+    const tab = tabs[index]
     setDragIndex(index)
-    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.effectAllowed = 'copyMove'
     event.dataTransfer.setData('text/plain', String(index))
+    if (tab) {
+      event.dataTransfer.setData(
+        TabDragMime,
+        JSON.stringify({ documentId: tab.document.documentId }),
+      )
+    }
   }
 
   const onDragOver = (event: DragEvent<HTMLButtonElement>, index: number) => {
+    if (Array.from(event.dataTransfer.types).includes(PageDragMime)) {
+      return
+    }
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
     if (overIndex !== index) {
@@ -41,6 +52,11 @@ export function TabBar({
 
   const onDrop = (event: DragEvent<HTMLButtonElement>, index: number) => {
     event.preventDefault()
+    if (Array.from(event.dataTransfer.types).includes(PageDragMime)) {
+      setDragIndex(null)
+      setOverIndex(null)
+      return
+    }
     const from = dragIndex ?? Number(event.dataTransfer.getData('text/plain'))
     if (Number.isFinite(from)) {
       onReorder(from, index)

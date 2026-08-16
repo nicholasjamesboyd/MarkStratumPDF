@@ -101,6 +101,13 @@ export type LayerMutationResult =
   | { ok: true; document: DocumentInfo; layers: LayerInfo[]; layersRevision: number }
   | { ok: false; error: string }
 
+export type PageMutationResult =
+  | { ok: true; document: DocumentInfo; pagesRevision: number }
+  | { ok: false; error: string }
+
+export const PageDragMime = 'application/x-markstratum-page'
+export const TabDragMime = 'application/x-markstratum-tab'
+
 export type RenderPageRequest = {
   documentId: string
   pageIndex: number
@@ -134,6 +141,9 @@ export const IpcChannels = {
   createLayer: 'pdf:createLayer',
   renameLayer: 'pdf:renameLayer',
   deleteLayer: 'pdf:deleteLayer',
+  reorderPages: 'pdf:reorderPages',
+  insertPagesFromDocument: 'pdf:insertPagesFromDocument',
+  insertPagesFromPath: 'pdf:insertPagesFromPath',
   save: 'pdf:save',
   saveAs: 'pdf:saveAs',
   takePendingOpenPath: 'app:takePendingOpenPath',

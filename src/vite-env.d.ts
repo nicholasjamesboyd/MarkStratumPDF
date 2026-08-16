@@ -8,6 +8,7 @@ import type {
   LayerMutationResult,
   MenuZoomCommand,
   OpenDocumentResult,
+  PageMutationResult,
   RenderedPage,
   RenderPageRequest,
   SaveDocumentResult,
@@ -42,7 +43,25 @@ type MarkStratumApi = {
     layerId: string,
     name: string,
   ) => Promise<LayerMutationResult>
-  deleteLayer: (documentId: string, layerId: string) => Promise<LayerMutationResult>
+  deleteLayer: (
+    documentId: string,
+    layerId: string,
+  ) => Promise<LayerMutationResult>
+  reorderPages: (
+    documentId: string,
+    fromIndex: number,
+    toIndex: number,
+  ) => Promise<PageMutationResult>
+  insertPagesFromDocument: (
+    targetDocumentId: string,
+    sourceDocumentId: string,
+    insertAt: number,
+  ) => Promise<PageMutationResult>
+  insertPagesFromPath: (
+    targetDocumentId: string,
+    filePath: string,
+    insertAt: number,
+  ) => Promise<PageMutationResult>
   saveDocument: (documentId: string) => Promise<SaveDocumentResult>
   saveDocumentAs: (documentId: string) => Promise<SaveDocumentResult | null>
   takePendingOpenPath: () => Promise<string | null>

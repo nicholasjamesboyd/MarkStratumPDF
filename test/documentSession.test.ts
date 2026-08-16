@@ -44,6 +44,15 @@ async function writeFillablePdf(filePath: string) {
   writeFileSync(filePath, bytes)
 }
 
+async function writeSizedPdf(filePath: string, sizes: Array<[number, number]>) {
+  const pdf = await PDFDocument.create()
+  for (const [width, height] of sizes) {
+    pdf.addPage([width, height])
+  }
+  const bytes = await pdf.save()
+  writeFileSync(filePath, bytes)
+}
+
 describe('DocumentSession multi-doc', () => {
   it('keeps multiple documents open and renders by documentId', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'markstratum-session-'))
@@ -162,6 +171,108 @@ describe('DocumentSession form save', () => {
 
     const onDisk = await PDFDocument.load(readFileSync(dest))
     expect(onDisk.getForm().getTextField('FullName').getText()).toBe('Saved As Name')
+
+    await session.close()
+  })
+})
+
+describe('DocumentSession page ops', () => {
+  it('reorders pages, marks the document dirty, and persists order on save', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'markstratum-session-reorder-'))
+    const filePath = join(dir, 'pages.pdf')
+    await writeSizedPdf(filePath, [
+      [100, 100],
+      [200, 100],
+      [300, 100],
+    ])
+
+    const session = new DocumentSession()
+    const opened = await session.open(filePath)
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) {
+      return
+    }
+
+    const documentId = opened.document.documentId
+    const reordered = await session.reorderPages(documentId, 0, 2)
+    expect(reordered.ok).toBe(true)
+    if (!reordered.ok) {
+      return
+    }
+    expect(reordered.document.dirty).toBe(true)
+    expect(reordered.document.pageCount).toBe(3)
+    expect(reordered.pagesRevision).toBeGreaterThan(0)
+
+    const saved = await session.save(documentId)
+    expect(saved.ok).toBe(true)
+    if (!saved.ok) {
+      return
+    }
+    expect(saved.document.dirty).toBe(false)
+
+    const onDisk = await PDFDocument.load(readFileSync(filePath))
+    const sizes = onDisk.getPages().map((page) => page.getSize().width)
+    expect(sizes).toEqual([200, 300, 100])
+
+    await session.close()
+  })
+
+  it('copies pages from another open document at the insert index', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'markstratum-session-insert-'))
+    const targetPath = join(dir, 'target.pdf')
+    const sourcePath = join(dir, 'source.pdf')
+    await writeSizedPdf(targetPath, [
+      [100, 100],
+      [200, 100],
+    ])
+    await writeSizedPdf(sourcePath, [
+      [50, 50],
+      [60, 60],
+    ])
+
+    const session = new DocumentSession()
+    const target = await session.open(targetPath)
+    const source = await session.open(sourcePath)
+    expect(target.ok).toBe(true)
+    expect(source.ok).toBe(true)
+    if (!target.ok || !source.ok) {
+      return
+    }
+
+    const inserted = await session.insertPagesFromDocument(
+      target.document.documentId,
+      source.document.documentId,
+      1,
+    )
+    expect(inserted.ok).toBe(true)
+    if (!inserted.ok) {
+      return
+    }
+    expect(inserted.document.pageCount).toBe(4)
+    expect(inserted.document.dirty).toBe(true)
+    expect(source.document.pageCount).toBe(2)
+
+    const extraPath = join(dir, 'extra.pdf')
+    await writeSizedPdf(extraPath, [[90, 90]])
+    const fromDisk = await session.insertPagesFromPath(
+      target.document.documentId,
+      extraPath,
+      0,
+    )
+    expect(fromDisk.ok).toBe(true)
+    if (fromDisk.ok) {
+      expect(fromDisk.document.pageCount).toBe(5)
+    }
+
+    const fromPath = await session.insertPagesFromPath(
+      target.document.documentId,
+      sourcePath,
+      0,
+    )
+    expect(fromPath.ok).toBe(true)
+    if (fromPath.ok) {
+      expect(fromPath.document.pageCount).toBe(7)
+    }
 
     await session.close()
   })

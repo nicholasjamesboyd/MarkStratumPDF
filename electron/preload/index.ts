@@ -8,6 +8,7 @@ import {
   type LayerMutationResult,
   type MenuZoomCommand,
   type OpenDocumentResult,
+  type PageMutationResult,
   type RenderedPage,
   type RenderPageRequest,
   type SaveDocumentResult,
@@ -42,7 +43,25 @@ export type MarkStratumApi = {
     layerId: string,
     name: string,
   ) => Promise<LayerMutationResult>
-  deleteLayer: (documentId: string, layerId: string) => Promise<LayerMutationResult>
+  deleteLayer: (
+    documentId: string,
+    layerId: string,
+  ) => Promise<LayerMutationResult>
+  reorderPages: (
+    documentId: string,
+    fromIndex: number,
+    toIndex: number,
+  ) => Promise<PageMutationResult>
+  insertPagesFromDocument: (
+    targetDocumentId: string,
+    sourceDocumentId: string,
+    insertAt: number,
+  ) => Promise<PageMutationResult>
+  insertPagesFromPath: (
+    targetDocumentId: string,
+    filePath: string,
+    insertAt: number,
+  ) => Promise<PageMutationResult>
   saveDocument: (documentId: string) => Promise<SaveDocumentResult>
   saveDocumentAs: (documentId: string) => Promise<SaveDocumentResult | null>
   takePendingOpenPath: () => Promise<string | null>
@@ -90,6 +109,17 @@ const api: MarkStratumApi = {
     ipcRenderer.invoke(IpcChannels.renameLayer, documentId, layerId, name),
   deleteLayer: (documentId, layerId) =>
     ipcRenderer.invoke(IpcChannels.deleteLayer, documentId, layerId),
+  reorderPages: (documentId, fromIndex, toIndex) =>
+    ipcRenderer.invoke(IpcChannels.reorderPages, documentId, fromIndex, toIndex),
+  insertPagesFromDocument: (targetDocumentId, sourceDocumentId, insertAt) =>
+    ipcRenderer.invoke(
+      IpcChannels.insertPagesFromDocument,
+      targetDocumentId,
+      sourceDocumentId,
+      insertAt,
+    ),
+  insertPagesFromPath: (targetDocumentId, filePath, insertAt) =>
+    ipcRenderer.invoke(IpcChannels.insertPagesFromPath, targetDocumentId, filePath, insertAt),
   saveDocument: (documentId) => ipcRenderer.invoke(IpcChannels.save, documentId),
   saveDocumentAs: (documentId) => ipcRenderer.invoke(IpcChannels.saveAs, documentId),
   takePendingOpenPath: () => ipcRenderer.invoke(IpcChannels.takePendingOpenPath),

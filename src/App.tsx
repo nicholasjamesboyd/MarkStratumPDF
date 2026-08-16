@@ -42,6 +42,7 @@ export default function App() {
     setFocusedPane,
     setFormValuesForDocument,
     applyLayersChanged,
+    applyPagesChanged,
   } = useWorkspace({ onDocumentOpened: recordOpen })
 
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 })
@@ -247,6 +248,7 @@ export default function App() {
         formFields={tab.formFields}
         formRevision={tab.formRevision}
         layersRevision={tab.layersRevision}
+        pagesRevision={tab.pagesRevision}
         onFormValuesChange={(updates) => {
           void setFormValuesForDocument(tab.document.documentId, updates)
         }}
@@ -273,7 +275,11 @@ export default function App() {
           }}
           onClearRecent={clearRecent}
           documentId={focusedTab?.document.documentId ?? null}
+          pages={focusedTab?.document.pages ?? []}
+          pageIndex={focusedTab?.pageIndex ?? 0}
+          pagesRevision={focusedTab?.pagesRevision ?? 0}
           layersRevision={focusedTab?.layersRevision ?? 0}
+          renderPageToUrl={renderPageToUrl}
           onGoToBookmarkPage={(pageIndex) => {
             if (!focusedTabId || !focusedTab) {
               return
@@ -281,6 +287,9 @@ export default function App() {
             const maxIndex = Math.max(0, focusedTab.document.pageCount - 1)
             const nextIndex = Math.min(maxIndex, Math.max(0, pageIndex))
             updateTab(focusedTabId, { pageIndex: nextIndex })
+          }}
+          onPagesChanged={(result, kind) => {
+            void applyPagesChanged(result, kind)
           }}
           onLayersChanged={applyLayersChanged}
           onError={setError}

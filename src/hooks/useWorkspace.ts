@@ -18,6 +18,7 @@ export type TabState = {
   formFields: FormFieldInfo[]
   formRevision: number
   layersRevision: number
+  pagesRevision: number
 }
 
 export type WorkspaceLayout =
@@ -130,6 +131,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
         formFields: [],
         formRevision: 0,
         layersRevision: 0,
+        pagesRevision: 0,
       }
       setTabs((prev) => [...prev, next])
       setLayout((current) => {
@@ -276,6 +278,48 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
               }
             : tab,
         ),
+      )
+    },
+    [],
+  )
+
+  const applyPagesChanged = useCallback(
+    async (
+      result: { document: DocumentInfo; pagesRevision: number },
+      kind: { type: 'reorder'; fromIndex: number; toIndex: number } | { type: 'insert'; insertAt: number },
+    ) => {
+      let fields: FormFieldInfo[] = []
+      try {
+        fields = await window.markStratum.getFormFields(result.document.documentId)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== result.document.documentId) {
+            return tab
+          }
+          let nextPageIndex = tab.pageIndex
+          if (kind.type === 'reorder') {
+            nextPageIndex = mapPageIndexAfterReorder(
+              tab.pageIndex,
+              kind.fromIndex,
+              kind.toIndex,
+            )
+          } else {
+            const insertedCount = result.document.pageCount - tab.document.pageCount
+            nextPageIndex = mapPageIndexAfterInsert(tab.pageIndex, kind.insertAt, insertedCount)
+          }
+          const maxIndex = Math.max(0, result.document.pageCount - 1)
+          return {
+            ...tab,
+            document: result.document,
+            pagesRevision: result.pagesRevision,
+            pageIndex: Math.min(maxIndex, Math.max(0, nextPageIndex)),
+            formFields: fields,
+            formRevision: tab.formRevision + 1,
+          }
+        }),
       )
     },
     [],
@@ -481,9 +525,41 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     saveFocusedDocumentAs,
     setFormValuesForDocument,
     applyLayersChanged,
+    applyPagesChanged,
     toggleSplit,
     setSplitSizes,
     setFocusedPane,
     renderPageToUrl,
   }
+}
+
+export function mapPageIndexAfterReorder(
+  current: number,
+  fromIndex: number,
+  toIndex: number,
+): number {
+  if (fromIndex === toIndex) {
+    return current
+  }
+  if (current === fromIndex) {
+    return toIndex
+  }
+  if (fromIndex < toIndex && current > fromIndex && current <= toIndex) {
+    return current - 1
+  }
+  if (fromIndex > toIndex && current >= toIndex && current < fromIndex) {
+    return current + 1
+  }
+  return current
+}
+
+export function mapPageIndexAfterInsert(
+  current: number,
+  insertAt: number,
+  insertedCount: number,
+): number {
+  if (insertedCount <= 0 || current < insertAt) {
+    return current
+  }
+  return current + insertedCount
 }

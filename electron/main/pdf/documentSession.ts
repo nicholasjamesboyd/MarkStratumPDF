@@ -9,6 +9,7 @@ import type {
   LayerInfo,
   LayerMutationResult,
   OpenDocumentResult,
+  PageMutationResult,
   RenderedPage,
   RenderPageRequest,
   SaveDocumentResult,
@@ -22,6 +23,7 @@ import {
   renameLayerInBytes,
   setLayerVisibilityInBytes,
 } from './ocgService'
+import { insertPagesFromBytes, reorderPagesInBytes } from './pageOps'
 import { LruCache, makePageCacheKey } from './pageCache'
 import {
   PdfiumEngine,
@@ -40,9 +42,10 @@ type OpenDocument = {
   formValues: Map<string, string>
   dirty: boolean
   password?: string
-  /** Temp PDF with pending layer edits; PDFium renders from this when set. */
+  /** Temp PDF with pending layer or page edits; PDFium renders from this when set. */
   workPath?: string
   layersRevision: number
+  pagesRevision: number
 }
 
 export class DocumentSession {
@@ -58,13 +61,8 @@ export class DocumentSession {
   }
 
   findByPath(filePath: string): DocumentInfo | null {
-    const normalized = normalizePath(filePath)
-    for (const entry of this.documents.values()) {
-      if (normalizePath(entry.info.path) === normalized) {
-        return toDocumentInfo(entry)
-      }
-    }
-    return null
+    const entry = this.findEntryByPath(filePath)
+    return entry ? toDocumentInfo(entry) : null
   }
 
   getDocument(documentId: string): DocumentInfo | null {
@@ -99,6 +97,7 @@ export class DocumentSession {
         dirty: false,
         password,
         layersRevision: 0,
+        pagesRevision: 0,
       })
       return { ok: true, document: toDocumentInfo(this.documents.get(handle.id)!) }
     } catch (error) {
@@ -256,6 +255,85 @@ export class DocumentSession {
     return this.mutateLayers(documentId, (bytes) => deleteLayerInBytes(bytes, layerId))
   }
 
+  async reorderPages(
+    documentId: string,
+    fromIndex: number,
+    toIndex: number,
+  ): Promise<PageMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+
+    const pageCount = entry.info.pageCount
+    if (pageCount === 0) {
+      return { ok: true, document: toDocumentInfo(entry), pagesRevision: entry.pagesRevision }
+    }
+
+    const from = clampIndex(fromIndex, 0, pageCount - 1)
+    const to = clampIndex(toIndex, 0, pageCount - 1)
+    if (from === to) {
+      return { ok: true, document: toDocumentInfo(entry), pagesRevision: entry.pagesRevision }
+    }
+
+    return this.mutatePages(entry, (bytes) => reorderPagesInBytes(bytes, from, to))
+  }
+
+  async insertPagesFromDocument(
+    targetDocumentId: string,
+    sourceDocumentId: string,
+    insertAt: number,
+  ): Promise<PageMutationResult> {
+    const target = this.documents.get(targetDocumentId)
+    if (!target) {
+      return { ok: false, error: 'No document open.' }
+    }
+    if (targetDocumentId === sourceDocumentId) {
+      return { ok: true, document: toDocumentInfo(target), pagesRevision: target.pagesRevision }
+    }
+
+    const source = this.documents.get(sourceDocumentId)
+    if (!source) {
+      return { ok: false, error: 'Source document is not open.' }
+    }
+
+    try {
+      const sourceBytes = await readFile(renderPath(source))
+      return await this.mutatePages(target, (bytes) =>
+        insertPagesFromBytes(bytes, sourceBytes, insertAt),
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
+  async insertPagesFromPath(
+    targetDocumentId: string,
+    filePath: string,
+    insertAt: number,
+  ): Promise<PageMutationResult> {
+    const existing = this.findByPath(filePath)
+    if (existing) {
+      return this.insertPagesFromDocument(targetDocumentId, existing.documentId, insertAt)
+    }
+
+    const target = this.documents.get(targetDocumentId)
+    if (!target) {
+      return { ok: false, error: 'No document open.' }
+    }
+
+    try {
+      const sourceBytes = await readFile(filePath)
+      return await this.mutatePages(target, (bytes) =>
+        insertPagesFromBytes(bytes, sourceBytes, insertAt),
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
   private async mutateLayers(
     documentId: string,
     mutate: (bytes: Uint8Array) => Promise<Uint8Array>,
@@ -268,45 +346,8 @@ export class DocumentSession {
     try {
       const sourceBytes = await readFile(renderPath(entry))
       const nextBytes = await mutate(sourceBytes)
-      const nextWorkPath = path.join(
-        path.dirname(entry.info.path),
-        `.markstratum-layers-${randomBytes(8).toString('hex')}.pdf`,
-      )
-      await writeFile(nextWorkPath, nextBytes)
-
-      const previousWorkPath = entry.workPath
-      await this.engine.release(entry.handle)
-      try {
-        await this.engine.reopen(entry.handle, nextWorkPath, entry.password)
-      } catch (error) {
-        try {
-          await this.engine.reopen(entry.handle, renderPath(entry), entry.password)
-        } catch {
-          // ignore secondary failure
-        }
-        try {
-          await unlink(nextWorkPath)
-        } catch {
-          // ignore
-        }
-        throw error
-      }
-
-      entry.workPath = nextWorkPath
-      entry.dirty = true
-      entry.info = { ...entry.info, dirty: true }
+      await this.commitWorkingPdf(entry, nextBytes, { refreshPages: false })
       entry.layersRevision += 1
-      entry.cache.clear()
-      entry.inflight.clear()
-
-      if (previousWorkPath && previousWorkPath !== nextWorkPath) {
-        try {
-          await unlink(previousWorkPath)
-        } catch {
-          // ignore stale temp cleanup
-        }
-      }
-
       const layers = await listLayersFromBytes(nextBytes)
       return {
         ok: true,
@@ -318,6 +359,91 @@ export class DocumentSession {
       const message = error instanceof Error ? error.message : String(error)
       return { ok: false, error: message }
     }
+  }
+
+  private async mutatePages(
+    entry: OpenDocument,
+    mutate: (bytes: Uint8Array) => Promise<Uint8Array>,
+  ): Promise<PageMutationResult> {
+    try {
+      const sourceBytes = await readFile(renderPath(entry))
+      const nextBytes = await mutate(sourceBytes)
+      await this.commitWorkingPdf(entry, nextBytes, { refreshPages: true })
+      return {
+        ok: true,
+        document: toDocumentInfo(entry),
+        pagesRevision: entry.pagesRevision,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
+  private async commitWorkingPdf(
+    entry: OpenDocument,
+    nextBytes: Uint8Array,
+    options: { refreshPages: boolean },
+  ): Promise<void> {
+    const nextWorkPath = path.join(
+      path.dirname(entry.info.path),
+      `.markstratum-work-${randomBytes(8).toString('hex')}.pdf`,
+    )
+    await writeFile(nextWorkPath, nextBytes)
+
+    const previousWorkPath = entry.workPath
+    await this.engine.release(entry.handle)
+    try {
+      await this.engine.reopen(entry.handle, nextWorkPath, entry.password)
+    } catch (error) {
+      try {
+        await this.engine.reopen(entry.handle, renderPath(entry), entry.password)
+      } catch {
+        // ignore secondary failure
+      }
+      try {
+        await unlink(nextWorkPath)
+      } catch {
+        // ignore
+      }
+      throw error
+    }
+
+    entry.workPath = nextWorkPath
+    entry.dirty = true
+    entry.cache.clear()
+    entry.inflight.clear()
+
+    if (options.refreshPages) {
+      const pages = await this.engine.getPages(entry.handle)
+      entry.pagesRevision += 1
+      entry.info = {
+        ...entry.info,
+        pages,
+        pageCount: pages.length,
+        dirty: true,
+      }
+    } else {
+      entry.info = { ...entry.info, dirty: true }
+    }
+
+    if (previousWorkPath && previousWorkPath !== nextWorkPath) {
+      try {
+        await unlink(previousWorkPath)
+      } catch {
+        // ignore stale temp cleanup
+      }
+    }
+  }
+
+  private findEntryByPath(filePath: string): OpenDocument | null {
+    const normalized = normalizePath(filePath)
+    for (const entry of this.documents.values()) {
+      if (normalizePath(entry.info.path) === normalized) {
+        return entry
+      }
+    }
+    return null
   }
 
   async save(documentId: string): Promise<SaveDocumentResult> {
@@ -555,6 +681,13 @@ function toWirePage(rendered: EngineRenderedPage, requestId: string): RenderedPa
 
 function normalizePath(filePath: string): string {
   return path.normalize(filePath).toLowerCase()
+}
+
+function clampIndex(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min
+  }
+  return Math.min(max, Math.max(min, Math.trunc(value)))
 }
 
 async function replaceFile(sourcePath: string, destPath: string): Promise<void> {

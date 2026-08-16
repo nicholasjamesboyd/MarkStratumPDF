@@ -11,7 +11,8 @@ MarkStratum targets document and drawing workflows: multi-page viewing, pan/zoom
 Beyond the original viewer MVP, the app now includes a multi-document shell, fillable forms, and OCG layer controls:
 
 - Open local PDFs (dialog, drag-and-drop, or OS open-with / default app)
-- Multi-tab workspace, recent files, bookmarks panel, and horizontal split view
+- Multi-tab workspace, recent files, bookmarks panel, Pages panel, and horizontal split view
+- Pages panel: click a thumbnail to jump, drag pages to reorder, drop another tab or PDF to insert its pages
 - Document mode: continuous vertical scroll
 - Drawing mode: pan/drag and wheel zoom toward the cursor
 - Visible-page rendering via PDFium (not PDF.js)
@@ -21,7 +22,7 @@ Beyond the original viewer MVP, the app now includes a multi-document shell, fil
 - Save and Save As write filled values while keeping the form editable
 - Optional Content Groups (layers): list, toggle visibility, create, rename, and delete; changes re-render via PDFium and persist on Save
 
-Not built yet: markups, measure, stamps, page editing/combine, flatten, signature fields, or OCR.
+Not built yet: markups, measure, stamps, page extract/delete/split, flatten, signature fields, or OCR.
 
 ## Requirements
 

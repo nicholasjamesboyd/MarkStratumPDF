@@ -231,6 +231,32 @@ function registerIpc() {
     },
   )
 
+  ipcMain.handle(
+    IpcChannels.reorderPages,
+    async (_event, documentId: string, fromIndex: number, toIndex: number) => {
+      return session.reorderPages(documentId, fromIndex, toIndex)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.insertPagesFromDocument,
+    async (
+      _event,
+      targetDocumentId: string,
+      sourceDocumentId: string,
+      insertAt: number,
+    ) => {
+      return session.insertPagesFromDocument(targetDocumentId, sourceDocumentId, insertAt)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.insertPagesFromPath,
+    async (_event, targetDocumentId: string, filePath: string, insertAt: number) => {
+      return session.insertPagesFromPath(targetDocumentId, filePath, insertAt)
+    },
+  )
+
   ipcMain.handle(IpcChannels.save, async (_event, documentId: string): Promise<SaveDocumentResult> => {
     return session.save(documentId)
   })
