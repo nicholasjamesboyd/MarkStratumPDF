@@ -10,6 +10,10 @@ import type {
   LayerMutationResult,
   OpenDocumentResult,
   PageMutationResult,
+  PickPdfPathResult,
+  SplitDocumentResult,
+  ExtractPagesResult,
+  PageCropRect,
   RenderedPage,
   RenderPageRequest,
   SaveDocumentResult,
@@ -23,7 +27,17 @@ import {
   renameLayerInBytes,
   setLayerVisibilityInBytes,
 } from './ocgService'
-import { insertPagesFromBytes, reorderPagesInBytes } from './pageOps'
+import {
+  cropPagesInBytes,
+  deletePagesInBytes,
+  extractPagesToBytes,
+  insertBlankPageInBytes,
+  insertPagesFromBytes,
+  reorderPagesInBytes,
+  replacePagesInBytes,
+  rotatePagesInBytes,
+  splitDocumentAtPageBytes,
+} from './pageOps'
 import { LruCache, makePageCacheKey } from './pageCache'
 import {
   PdfiumEngine,
@@ -125,8 +139,10 @@ export class DocumentSession {
     if (!entry) {
       throw new Error(`No document open: ${req.documentId}`)
     }
-    const rotation = req.rotation ?? entry.info.pages[req.pageIndex]?.rotation ?? 0
-    const key = makePageCacheKey(req.pageIndex, req.scale, rotation)
+    const extraRotation = req.rotation ?? 0
+    const pageRotation = entry.info.pages[req.pageIndex]?.rotation ?? 0
+    const effectiveRotation = normalizeRenderRotation(pageRotation, extraRotation)
+    const key = makePageCacheKey(req.pageIndex, req.scale, effectiveRotation)
     const cached = entry.cache.get(key)
     if (cached) {
       return toWirePage(cached, req.requestId)
@@ -141,7 +157,7 @@ export class DocumentSession {
     const promise = this.engine
       .renderPage(entry.handle, {
         ...req,
-        rotation,
+        rotation: extraRotation,
       })
       .then((rendered) => {
         entry.cache.set(key, rendered)
@@ -328,6 +344,164 @@ export class DocumentSession {
       return await this.mutatePages(target, (bytes) =>
         insertPagesFromBytes(bytes, sourceBytes, insertAt),
       )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
+  async deletePages(documentId: string, indices: number[]): Promise<PageMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+    if (indices.length === 0) {
+      return { ok: true, document: toDocumentInfo(entry), pagesRevision: entry.pagesRevision }
+    }
+    return this.mutatePages(entry, (bytes) => deletePagesInBytes(bytes, indices))
+  }
+
+  async rotatePages(
+    documentId: string,
+    indices: number[],
+    quarterTurns: 1 | 3,
+  ): Promise<PageMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+    if (indices.length === 0) {
+      return { ok: true, document: toDocumentInfo(entry), pagesRevision: entry.pagesRevision }
+    }
+    return this.mutatePages(entry, (bytes) => rotatePagesInBytes(bytes, indices, quarterTurns))
+  }
+
+  async insertBlankPage(
+    documentId: string,
+    insertAt: number,
+  ): Promise<PageMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+    return this.mutatePages(entry, (bytes) => insertBlankPageInBytes(bytes, insertAt))
+  }
+
+  async cropPages(
+    documentId: string,
+    pageIndices: number[],
+    relativeCrop: PageCropRect,
+  ): Promise<PageMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+    if (pageIndices.length === 0) {
+      return { ok: true, document: toDocumentInfo(entry), pagesRevision: entry.pagesRevision }
+    }
+    return this.mutatePages(entry, (bytes) =>
+      cropPagesInBytes(bytes, pageIndices, relativeCrop),
+    )
+  }
+
+  async replacePagesFromDocument(
+    targetDocumentId: string,
+    targetIndices: number[],
+    sourceDocumentId: string,
+    sourceStartIndex: number,
+  ): Promise<PageMutationResult> {
+    const target = this.documents.get(targetDocumentId)
+    if (!target) {
+      return { ok: false, error: 'No document open.' }
+    }
+    const source = this.documents.get(sourceDocumentId)
+    if (!source) {
+      return { ok: false, error: 'Source document is not open.' }
+    }
+    try {
+      const sourceBytes = await readFile(renderPath(source))
+      return await this.mutatePages(target, (bytes) =>
+        replacePagesInBytes(bytes, targetIndices, sourceBytes, sourceStartIndex),
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
+  async replacePagesFromPath(
+    targetDocumentId: string,
+    targetIndices: number[],
+    filePath: string,
+    sourceStartIndex: number,
+  ): Promise<PageMutationResult> {
+    const existing = this.findByPath(filePath)
+    if (existing) {
+      return this.replacePagesFromDocument(
+        targetDocumentId,
+        targetIndices,
+        existing.documentId,
+        sourceStartIndex,
+      )
+    }
+
+    const target = this.documents.get(targetDocumentId)
+    if (!target) {
+      return { ok: false, error: 'No document open.' }
+    }
+
+    try {
+      const sourceBytes = await readFile(filePath)
+      return await this.mutatePages(target, (bytes) =>
+        replacePagesInBytes(bytes, targetIndices, sourceBytes, sourceStartIndex),
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
+  async extractPagesToFile(
+    documentId: string,
+    indices: number[],
+    destPath: string,
+  ): Promise<ExtractPagesResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+    try {
+      const sourceBytes = await readFile(renderPath(entry))
+      const extracted = await extractPagesToBytes(sourceBytes, indices)
+      await writeFile(destPath, extracted)
+      return { ok: true, savedPath: destPath }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
+  async splitDocumentAtPage(
+    documentId: string,
+    splitAt: number,
+    afterDestPath: string,
+  ): Promise<SplitDocumentResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+
+    try {
+      const sourceBytes = await readFile(renderPath(entry))
+      const { before, after } = await splitDocumentAtPageBytes(sourceBytes, splitAt)
+      await writeFile(afterDestPath, after)
+      await this.mutatePages(entry, async () => before)
+      return {
+        ok: true,
+        document: toDocumentInfo(entry),
+        pagesRevision: entry.pagesRevision,
+        savedPath: afterDestPath,
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return { ok: false, error: message }
@@ -677,6 +851,14 @@ function toWirePage(rendered: EngineRenderedPage, requestId: string): RenderedPa
     dataBase64: rendered.data.toString('base64'),
     requestId,
   }
+}
+
+function normalizeRenderRotation(pageRotation: number, extraRotation: number): 0 | 1 | 2 | 3 {
+  const mod = ((pageRotation + extraRotation) % 4 + 4) % 4
+  if (mod === 1 || mod === 2 || mod === 3) {
+    return mod
+  }
+  return 0
 }
 
 function normalizePath(filePath: string): string {

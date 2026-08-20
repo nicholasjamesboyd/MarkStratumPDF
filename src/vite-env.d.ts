@@ -2,17 +2,21 @@
 
 import type {
   BookmarkNode,
+  ExtractPagesResult,
   FormFieldInfo,
   FormValueUpdate,
   LayerInfo,
   LayerMutationResult,
   MenuZoomCommand,
   OpenDocumentResult,
+  PageCropRect,
   PageMutationResult,
+  PickPdfPathResult,
   RenderedPage,
   RenderPageRequest,
   SaveDocumentResult,
   SetFormValuesResult,
+  SplitDocumentResult,
   ViewMode,
 } from '../shared/ipc'
 
@@ -62,6 +66,39 @@ type MarkStratumApi = {
     filePath: string,
     insertAt: number,
   ) => Promise<PageMutationResult>
+  deletePages: (documentId: string, indices: number[]) => Promise<PageMutationResult>
+  rotatePages: (
+    documentId: string,
+    indices: number[],
+    quarterTurns: 1 | 3,
+  ) => Promise<PageMutationResult>
+  insertBlankPage: (documentId: string, insertAt: number) => Promise<PageMutationResult>
+  cropPages: (
+    documentId: string,
+    pageIndices: number[],
+    relativeCrop: PageCropRect,
+  ) => Promise<PageMutationResult>
+  replacePagesFromPath: (
+    targetDocumentId: string,
+    targetIndices: number[],
+    filePath: string,
+    sourceStartIndex: number,
+  ) => Promise<PageMutationResult>
+  replacePagesFromDocument: (
+    targetDocumentId: string,
+    targetIndices: number[],
+    sourceDocumentId: string,
+    sourceStartIndex: number,
+  ) => Promise<PageMutationResult>
+  extractPages: (
+    documentId: string,
+    indices: number[],
+  ) => Promise<ExtractPagesResult | null>
+  splitDocumentAtPage: (
+    documentId: string,
+    splitAt: number,
+  ) => Promise<SplitDocumentResult | null>
+  pickPdfPath: () => Promise<PickPdfPathResult>
   saveDocument: (documentId: string) => Promise<SaveDocumentResult>
   saveDocumentAs: (documentId: string) => Promise<SaveDocumentResult | null>
   takePendingOpenPath: () => Promise<string | null>

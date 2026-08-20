@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react'
-import type { DocumentInfo, FormFieldInfo, FormValueUpdate, ViewMode } from '../../shared/ipc'
+import { displayPageSize, type DocumentInfo, type FormFieldInfo, type FormValueUpdate, type ViewMode } from '../../shared/ipc'
 import { FormFieldOverlays } from './FormFieldOverlays'
 
 const PAGE_GAP = 12
@@ -86,8 +86,9 @@ export function PdfViewport({
     }
     let y = 0
     return document.pages.map((page) => {
-      const width = Math.max(1, page.width * scale)
-      const height = Math.max(1, page.height * scale)
+      const { width: displayWidth, height: displayHeight } = displayPageSize(page)
+      const width = Math.max(1, displayWidth * scale)
+      const height = Math.max(1, displayHeight * scale)
       const layout = { index: page.index, width, height, y }
       y += height + PAGE_GAP
       return layout
@@ -335,10 +336,10 @@ export function PdfViewport({
         <div className="empty-state">
           <img
             className="brand-logo"
-            src="./markstratum-logo.png"
+            src={`${import.meta.env.BASE_URL}markstratum-logo.png`}
             alt="MarkStratum"
             width={360}
-            height={196}
+            height={415}
           />
           <p>
             Drag a PDF onto this window, or choose File → Open.

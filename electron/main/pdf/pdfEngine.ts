@@ -143,25 +143,21 @@ export class PdfiumEngine implements PdfEngine {
       return []
     }
 
-    // Fast open: probe the first page, then reuse its size for placeholders.
-    const first = await native.getPage(0)
-    let width = DEFAULT_PAGE_WIDTH
-    let height = DEFAULT_PAGE_HEIGHT
-    let rotation: 0 | 1 | 2 | 3 = 0
-    try {
-      width = first.width || DEFAULT_PAGE_WIDTH
-      height = first.height || DEFAULT_PAGE_HEIGHT
-      rotation = normalizeRotation(first.rotation)
-    } finally {
-      first.close()
-    }
-
-    return Array.from({ length: pageCount }, (_, index) => ({
-      index,
-      width,
-      height,
-      rotation: index === 0 ? rotation : 0,
-    }))
+    return Promise.all(
+      Array.from({ length: pageCount }, async (_, index) => {
+        const page = await native.getPage(index)
+        try {
+          return {
+            index,
+            width: page.width || DEFAULT_PAGE_WIDTH,
+            height: page.height || DEFAULT_PAGE_HEIGHT,
+            rotation: normalizeRotation(page.rotation),
+          }
+        } finally {
+          page.close()
+        }
+      }),
+    )
   }
 
   async getBookmarks(doc: PdfDocumentHandle): Promise<BookmarkNode[]> {
@@ -193,16 +189,17 @@ export class PdfiumEngine implements PdfEngine {
       try {
         // Write to disk instead of returning a Buffer. Returning native render
         // buffers through Electron's main process can stall on Windows.
+        const extraRotation = req.rotation ?? 0
         await page.render({
           scale,
           format: 'jpeg',
           quality: 80,
-          rotation: req.rotation ?? 0,
+          rotation: extraRotation,
           renderAnnotations: true,
           output: outputPath,
         })
         const data = readFileSync(outputPath)
-        const { width, height } = estimatePixelSize(page, scale, req.rotation ?? 0)
+        const { width, height } = estimatePixelSize(page, scale)
         return {
           pageIndex: req.pageIndex,
           scale,
@@ -306,15 +303,9 @@ function clampScale(scale: number, page: PDFiumPage): number {
   return MAX_RENDER_EDGE_PX / Math.max(page.width, page.height)
 }
 
-function estimatePixelSize(
-  page: PDFiumPage,
-  scale: number,
-  rotation: 0 | 1 | 2 | 3,
-): SizePts {
-  const width = Math.max(1, Math.round(page.width * scale))
-  const height = Math.max(1, Math.round(page.height * scale))
-  if (rotation === 1 || rotation === 3) {
-    return { width: height, height: width }
+function estimatePixelSize(page: PDFiumPage, scale: number): SizePts {
+  return {
+    width: Math.max(1, Math.round(page.width * scale)),
+    height: Math.max(1, Math.round(page.height * scale)),
   }
-  return { width, height }
 }

@@ -8,7 +8,11 @@ import {
   type LayerMutationResult,
   type MenuZoomCommand,
   type OpenDocumentResult,
+  type PageCropRect,
   type PageMutationResult,
+  type PickPdfPathResult,
+  type ExtractPagesResult,
+  type SplitDocumentResult,
   type RenderedPage,
   type RenderPageRequest,
   type SaveDocumentResult,
@@ -62,6 +66,39 @@ export type MarkStratumApi = {
     filePath: string,
     insertAt: number,
   ) => Promise<PageMutationResult>
+  deletePages: (documentId: string, indices: number[]) => Promise<PageMutationResult>
+  rotatePages: (
+    documentId: string,
+    indices: number[],
+    quarterTurns: 1 | 3,
+  ) => Promise<PageMutationResult>
+  insertBlankPage: (documentId: string, insertAt: number) => Promise<PageMutationResult>
+  cropPages: (
+    documentId: string,
+    pageIndices: number[],
+    relativeCrop: PageCropRect,
+  ) => Promise<PageMutationResult>
+  replacePagesFromPath: (
+    targetDocumentId: string,
+    targetIndices: number[],
+    filePath: string,
+    sourceStartIndex: number,
+  ) => Promise<PageMutationResult>
+  replacePagesFromDocument: (
+    targetDocumentId: string,
+    targetIndices: number[],
+    sourceDocumentId: string,
+    sourceStartIndex: number,
+  ) => Promise<PageMutationResult>
+  extractPages: (
+    documentId: string,
+    indices: number[],
+  ) => Promise<ExtractPagesResult | null>
+  splitDocumentAtPage: (
+    documentId: string,
+    splitAt: number,
+  ) => Promise<SplitDocumentResult | null>
+  pickPdfPath: () => Promise<PickPdfPathResult>
   saveDocument: (documentId: string) => Promise<SaveDocumentResult>
   saveDocumentAs: (documentId: string) => Promise<SaveDocumentResult | null>
   takePendingOpenPath: () => Promise<string | null>
@@ -120,6 +157,35 @@ const api: MarkStratumApi = {
     ),
   insertPagesFromPath: (targetDocumentId, filePath, insertAt) =>
     ipcRenderer.invoke(IpcChannels.insertPagesFromPath, targetDocumentId, filePath, insertAt),
+  deletePages: (documentId, indices) =>
+    ipcRenderer.invoke(IpcChannels.deletePages, documentId, indices),
+  rotatePages: (documentId, indices, quarterTurns) =>
+    ipcRenderer.invoke(IpcChannels.rotatePages, documentId, indices, quarterTurns),
+  insertBlankPage: (documentId, insertAt) =>
+    ipcRenderer.invoke(IpcChannels.insertBlankPage, documentId, insertAt),
+  cropPages: (documentId, pageIndices, relativeCrop) =>
+    ipcRenderer.invoke(IpcChannels.cropPages, documentId, pageIndices, relativeCrop),
+  replacePagesFromPath: (targetDocumentId, targetIndices, filePath, sourceStartIndex) =>
+    ipcRenderer.invoke(
+      IpcChannels.replacePagesFromPath,
+      targetDocumentId,
+      targetIndices,
+      filePath,
+      sourceStartIndex,
+    ),
+  replacePagesFromDocument: (targetDocumentId, targetIndices, sourceDocumentId, sourceStartIndex) =>
+    ipcRenderer.invoke(
+      IpcChannels.replacePagesFromDocument,
+      targetDocumentId,
+      targetIndices,
+      sourceDocumentId,
+      sourceStartIndex,
+    ),
+  extractPages: (documentId, indices) =>
+    ipcRenderer.invoke(IpcChannels.extractPages, documentId, indices),
+  splitDocumentAtPage: (documentId, splitAt) =>
+    ipcRenderer.invoke(IpcChannels.splitDocumentAtPage, documentId, splitAt),
+  pickPdfPath: () => ipcRenderer.invoke(IpcChannels.pickPdfPath),
   saveDocument: (documentId) => ipcRenderer.invoke(IpcChannels.save, documentId),
   saveDocumentAs: (documentId) => ipcRenderer.invoke(IpcChannels.saveAs, documentId),
   takePendingOpenPath: () => ipcRenderer.invoke(IpcChannels.takePendingOpenPath),

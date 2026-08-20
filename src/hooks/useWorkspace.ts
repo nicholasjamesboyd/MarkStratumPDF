@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { PagesChangedKind } from '../components/panels/PagesPanel'
 import type {
   DocumentInfo,
   FormFieldInfo,
@@ -286,7 +287,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const applyPagesChanged = useCallback(
     async (
       result: { document: DocumentInfo; pagesRevision: number },
-      kind: { type: 'reorder'; fromIndex: number; toIndex: number } | { type: 'insert'; insertAt: number },
+      kind: PagesChangedKind,
     ) => {
       let fields: FormFieldInfo[] = []
       try {
@@ -306,9 +307,16 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
               kind.fromIndex,
               kind.toIndex,
             )
-          } else {
+          } else if (kind.type === 'insert') {
             const insertedCount = result.document.pageCount - tab.document.pageCount
             nextPageIndex = mapPageIndexAfterInsert(tab.pageIndex, kind.insertAt, insertedCount)
+          } else if (kind.type === 'insertBlank') {
+            const insertedCount = result.document.pageCount - tab.document.pageCount
+            nextPageIndex = mapPageIndexAfterInsert(tab.pageIndex, kind.insertAt, insertedCount)
+          } else if (kind.type === 'delete') {
+            nextPageIndex = mapPageIndexAfterDelete(tab.pageIndex, kind.deletedIndices)
+          } else if (kind.type === 'split') {
+            nextPageIndex = mapPageIndexAfterSplit(tab.pageIndex, kind.splitAt)
           }
           const maxIndex = Math.max(0, result.document.pageCount - 1)
           return {
@@ -562,4 +570,34 @@ export function mapPageIndexAfterInsert(
     return current
   }
   return current + insertedCount
+}
+
+export function mapPageIndexAfterDelete(current: number, deletedIndices: number[]): number {
+  const deleted = [...deletedIndices].sort((a, b) => a - b)
+  if (deleted.length === 0) {
+    return current
+  }
+  if (deleted.includes(current)) {
+    for (let index = current - 1; index >= 0; index -= 1) {
+      if (!deleted.includes(index)) {
+        return index
+      }
+    }
+    for (let index = current + 1; ; index += 1) {
+      if (!deleted.includes(index)) {
+        return index
+      }
+    }
+  }
+  let shift = 0
+  for (const index of deleted) {
+    if (index < current) {
+      shift += 1
+    }
+  }
+  return current - shift
+}
+
+export function mapPageIndexAfterSplit(current: number, splitAt: number): number {
+  return Math.min(current, Math.max(0, splitAt - 1))
 }

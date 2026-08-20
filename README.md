@@ -12,7 +12,7 @@ Beyond the original viewer MVP, the app now includes a multi-document shell, fil
 
 - Open local PDFs (dialog, drag-and-drop, or OS open-with / default app)
 - Multi-tab workspace, recent files, bookmarks panel, Pages panel, and horizontal split view
-- Pages panel: click a thumbnail to jump, drag pages to reorder, drop another tab or PDF to insert its pages
+- Pages preview shelf: resizable multi-column thumbnail grid, page tools (insert, extract, delete, split, rotate, replace, crop), drag to reorder, drop PDFs/tabs to insert or replace
 - Document mode: continuous vertical scroll
 - Drawing mode: pan/drag and wheel zoom toward the cursor
 - Visible-page rendering via PDFium (not PDF.js)
@@ -22,7 +22,7 @@ Beyond the original viewer MVP, the app now includes a multi-document shell, fil
 - Save and Save As write filled values while keeping the form editable
 - Optional Content Groups (layers): list, toggle visibility, create, rename, and delete; changes re-render via PDFium and persist on Save
 
-Not built yet: markups, measure, stamps, page extract/delete/split, flatten, signature fields, or OCR.
+Not built yet: markups, measure, stamps, flatten, signature fields, or OCR.
 
 ## Requirements
 
@@ -47,6 +47,7 @@ Useful scripts:
 | `npm test` | Unit tests |
 | `npm run build` | Production build + installer |
 | `npm run build:dir` | Unpackaged build for local testing |
+| `npm run icons` | Regenerate favicon and app icons from `public/logo-source.png` |
 
 ## Architecture
 

@@ -9,6 +9,10 @@ import {
   type OpenDocumentResult,
   type RenderPageRequest,
   type SaveDocumentResult,
+  type PageCropRect,
+  type SplitDocumentResult,
+  type ExtractPagesResult,
+  type PickPdfPathResult,
 } from '../../shared/ipc'
 import { concurrency } from 'pdfium-native'
 import { DocumentSession } from './pdf/documentSession'
@@ -256,6 +260,148 @@ function registerIpc() {
       return session.insertPagesFromPath(targetDocumentId, filePath, insertAt)
     },
   )
+
+  ipcMain.handle(
+    IpcChannels.deletePages,
+    async (_event, documentId: string, indices: number[]) => {
+      return session.deletePages(documentId, indices)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.rotatePages,
+    async (_event, documentId: string, indices: number[], quarterTurns: 1 | 3) => {
+      return session.rotatePages(documentId, indices, quarterTurns)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.insertBlankPage,
+    async (_event, documentId: string, insertAt: number) => {
+      return session.insertBlankPage(documentId, insertAt)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.cropPages,
+    async (
+      _event,
+      documentId: string,
+      pageIndices: number[],
+      relativeCrop: PageCropRect,
+    ) => {
+      return session.cropPages(documentId, pageIndices, relativeCrop)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.replacePagesFromDocument,
+    async (
+      _event,
+      targetDocumentId: string,
+      targetIndices: number[],
+      sourceDocumentId: string,
+      sourceStartIndex: number,
+    ) => {
+      return session.replacePagesFromDocument(
+        targetDocumentId,
+        targetIndices,
+        sourceDocumentId,
+        sourceStartIndex,
+      )
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.replacePagesFromPath,
+    async (
+      _event,
+      targetDocumentId: string,
+      targetIndices: number[],
+      filePath: string,
+      sourceStartIndex: number,
+    ) => {
+      return session.replacePagesFromPath(
+        targetDocumentId,
+        targetIndices,
+        filePath,
+        sourceStartIndex,
+      )
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.extractPages,
+    async (event, documentId: string, indices: number[]) => {
+      const entry = session.getDocument(documentId)
+      if (!entry) {
+        return { ok: false, error: 'No document open.' } satisfies ExtractPagesResult
+      }
+      const parent =
+        BrowserWindow.fromWebContents(event.sender) ?? win ?? BrowserWindow.getFocusedWindow()
+      if (!parent) {
+        return { ok: false, error: 'No window available for the save dialog.' }
+      }
+      const baseName = entry.fileName.replace(/\.pdf$/i, '')
+      const picked = await dialog.showSaveDialog(parent, {
+        title: 'Extract Pages',
+        defaultPath: `${baseName}-extract.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (picked.canceled || !picked.filePath) {
+        return null
+      }
+      const destPath = picked.filePath.toLowerCase().endsWith('.pdf')
+        ? picked.filePath
+        : `${picked.filePath}.pdf`
+      return session.extractPagesToFile(documentId, indices, destPath)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.splitDocumentAtPage,
+    async (event, documentId: string, splitAt: number) => {
+      const entry = session.getDocument(documentId)
+      if (!entry) {
+        return { ok: false, error: 'No document open.' } satisfies SplitDocumentResult
+      }
+      const parent =
+        BrowserWindow.fromWebContents(event.sender) ?? win ?? BrowserWindow.getFocusedWindow()
+      if (!parent) {
+        return { ok: false, error: 'No window available for the save dialog.' }
+      }
+      const baseName = entry.fileName.replace(/\.pdf$/i, '')
+      const picked = await dialog.showSaveDialog(parent, {
+        title: 'Save Split Document',
+        defaultPath: `${baseName}-split.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (picked.canceled || !picked.filePath) {
+        return null
+      }
+      const destPath = picked.filePath.toLowerCase().endsWith('.pdf')
+        ? picked.filePath
+        : `${picked.filePath}.pdf`
+      return session.splitDocumentAtPage(documentId, splitAt, destPath)
+    },
+  )
+
+  ipcMain.handle(IpcChannels.pickPdfPath, async (event): Promise<PickPdfPathResult> => {
+    const parent =
+      BrowserWindow.fromWebContents(event.sender) ?? win ?? BrowserWindow.getFocusedWindow()
+    if (!parent) {
+      return null
+    }
+    const picked = await dialog.showOpenDialog(parent, {
+      title: 'Choose PDF',
+      properties: ['openFile'],
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    if (picked.canceled || picked.filePaths.length === 0) {
+      return null
+    }
+    return { ok: true, path: picked.filePaths[0]! }
+  })
 
   ipcMain.handle(IpcChannels.save, async (_event, documentId: string): Promise<SaveDocumentResult> => {
     return session.save(documentId)

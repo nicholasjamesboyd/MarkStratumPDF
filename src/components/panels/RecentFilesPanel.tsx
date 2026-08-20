@@ -1,4 +1,5 @@
 import type { RecentFileEntry } from '../../hooks/useRecentFiles'
+import { BrandMark } from '../BrandMark'
 
 type RecentFilesPanelProps = {
   entries: RecentFileEntry[]
@@ -33,12 +34,7 @@ export function RecentFilesPanel({ entries, onOpen, onClear }: RecentFilesPanelP
                   onClick={() => onOpen(entry.path)}
                 >
                   <span className="recent-file-icon" aria-hidden="true">
-                    <svg viewBox="0 0 16 16" width="14" height="14">
-                      <path
-                        fill="currentColor"
-                        d="M3 1.5h6.3L13 5.2V14a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 14V1.5zm6.1.7V5h3.2L9.1 2.2z"
-                      />
-                    </svg>
+                    <BrandMark size={16} />
                   </span>
                   <span className="recent-file-text">
                     <span className="recent-file-name">{entry.name}</span>

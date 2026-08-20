@@ -291,6 +291,9 @@ export default function App() {
           onPagesChanged={(result, kind) => {
             void applyPagesChanged(result, kind)
           }}
+          onOpenFilePath={(filePath) => {
+            void openPath(filePath)
+          }}
           onLayersChanged={applyLayersChanged}
           onError={setError}
         />

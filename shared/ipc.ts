@@ -10,6 +10,11 @@ export type PageInfo = SizePts & {
   rotation: 0 | 1 | 2 | 3
 }
 
+export function displayPageSize(page: Pick<PageInfo, 'width' | 'height' | 'rotation'>): SizePts {
+  // PDFium reports width/height in the orientation viewers use (rotation already applied).
+  return { width: page.width, height: page.height }
+}
+
 export type DocumentInfo = {
   documentId: string
   path: string
@@ -105,6 +110,27 @@ export type PageMutationResult =
   | { ok: true; document: DocumentInfo; pagesRevision: number }
   | { ok: false; error: string }
 
+export type PageCropRect = {
+  /** Fraction of MediaBox width from left edge (0–1). */
+  left: number
+  /** Fraction of MediaBox height from bottom edge (0–1). */
+  bottom: number
+  /** Fraction of MediaBox width (0–1). */
+  width: number
+  /** Fraction of MediaBox height (0–1). */
+  height: number
+}
+
+export type SplitDocumentResult =
+  | { ok: true; document: DocumentInfo; pagesRevision: number; savedPath?: string }
+  | { ok: false; error: string }
+
+export type ExtractPagesResult =
+  | { ok: true; savedPath: string }
+  | { ok: false; error: string }
+
+export type PickPdfPathResult = { ok: true; path: string } | null
+
 export const PageDragMime = 'application/x-markstratum-page'
 export const TabDragMime = 'application/x-markstratum-tab'
 
@@ -144,6 +170,15 @@ export const IpcChannels = {
   reorderPages: 'pdf:reorderPages',
   insertPagesFromDocument: 'pdf:insertPagesFromDocument',
   insertPagesFromPath: 'pdf:insertPagesFromPath',
+  deletePages: 'pdf:deletePages',
+  rotatePages: 'pdf:rotatePages',
+  insertBlankPage: 'pdf:insertBlankPage',
+  extractPages: 'pdf:extractPages',
+  splitDocumentAtPage: 'pdf:splitDocumentAtPage',
+  replacePagesFromPath: 'pdf:replacePagesFromPath',
+  replacePagesFromDocument: 'pdf:replacePagesFromDocument',
+  cropPages: 'pdf:cropPages',
+  pickPdfPath: 'pdf:pickPdfPath',
   save: 'pdf:save',
   saveAs: 'pdf:saveAs',
   takePendingOpenPath: 'app:takePendingOpenPath',
