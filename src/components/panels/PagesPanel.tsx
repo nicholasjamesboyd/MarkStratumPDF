@@ -76,7 +76,10 @@ export function PagesPanel({
   const observerRef = useRef<IntersectionObserver | null>(null)
   const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
   const requestedRef = useRef<Set<number>>(new Set())
+  const pagesRevisionRef = useRef(pagesRevision)
   const suppressClickRef = useRef(false)
+
+  pagesRevisionRef.current = pagesRevision
 
   const sortedSelection = useMemo(
     () => [...selectedIndices].sort((a, b) => a - b),
@@ -94,9 +97,13 @@ export function PagesPanel({
     setCropOpen(false)
   }, [documentId])
 
+  // Thumbnails stay cached across scroll; only page edits invalidate them.
   useEffect(() => {
     setImages({})
     requestedRef.current = new Set()
+  }, [pagesRevision])
+
+  useEffect(() => {
     setDragIndex(null)
     setOverInsertIndex(null)
     setCropOpen(false)
@@ -109,10 +116,22 @@ export function PagesPanel({
       }
       if (next.size === 0 && pages.length > 0) {
         next.add(Math.min(pageIndex, pages.length - 1))
+      } else if (next.size === prev.size) {
+        let unchanged = true
+        for (const value of next) {
+          if (!prev.has(value)) {
+            unchanged = false
+            break
+          }
+        }
+        if (unchanged) {
+          return prev
+        }
       }
       return next
     })
-  }, [pageIndex, pages.length, pagesRevision])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pageIndex seeds selection after edits only
+  }, [pages.length, pagesRevision])
 
   useEffect(() => {
     if (!documentId) {
@@ -145,6 +164,7 @@ export function PagesPanel({
     }
 
     let cancelled = false
+    const revision = pagesRevision
     void (async () => {
       for (const index of neededPages) {
         if (cancelled) {
@@ -163,12 +183,14 @@ export function PagesPanel({
             documentId,
             pageIndex: index,
             scale: thumbScale(page),
-            requestId: `pages-thumb-${documentId}:${index}:${pagesRevision}`,
+            requestId: `pages-thumb-${documentId}:${index}:${revision}`,
           })
-          if (cancelled) {
+          // Keep finished thumbs even if the visible set changed mid-flight.
+          if (pagesRevisionRef.current !== revision) {
+            requestedRef.current.delete(index)
             return
           }
-          setImages((prev) => ({ ...prev, [index]: rendered.url }))
+          setImages((prev) => (prev[index] ? prev : { ...prev, [index]: rendered.url }))
         } catch {
           requestedRef.current.delete(index)
         }

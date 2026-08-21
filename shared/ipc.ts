@@ -33,6 +33,7 @@ export type BookmarkActionType =
   | 'unknown'
 
 export type BookmarkNode = {
+  id: string
   title: string
   pageIndex?: number
   open: boolean
@@ -40,6 +41,10 @@ export type BookmarkNode = {
   url?: string
   children?: BookmarkNode[]
 }
+
+export type BookmarkMutationResult =
+  | { ok: true; document: DocumentInfo; bookmarks: BookmarkNode[]; bookmarksRevision: number }
+  | { ok: false; error: string }
 
 export type FormFieldType =
   | 'textField'
@@ -110,6 +115,64 @@ export type PageMutationResult =
   | { ok: true; document: DocumentInfo; pagesRevision: number }
   | { ok: false; error: string }
 
+export type MarkupTool =
+  | 'line'
+  | 'rectangle'
+  | 'arc'
+  | 'ellipse'
+  | 'arrow'
+  | 'polyline'
+  | 'polygon'
+  | 'cloud'
+  | 'cloudCallout'
+  | 'callout'
+  | 'textBox'
+  | 'pen'
+  | 'highlighter'
+
+export type HatchPattern = 'none' | 'diagonal' | 'crosshatch'
+
+export type MarkupPoint = {
+  x: number
+  y: number
+}
+
+export type MarkupStyle = {
+  /** RGB components in 0–1. */
+  color: [number, number, number]
+  strokeWidth: number
+  hatch: HatchPattern
+  opacity?: number
+  contents?: string
+}
+
+export type MarkupCreateRequest = {
+  pageIndex: number
+  tool: MarkupTool
+  author: string
+  style: MarkupStyle
+  /** Page-space points (PDF Y-up). Meaning depends on tool. */
+  points: MarkupPoint[]
+}
+
+export type MarkupInfo = {
+  id: string
+  pageIndex: number
+  tool: MarkupTool
+  author: string
+  createdAt?: string
+  contents?: string
+  bounds: FormFieldBounds
+  hatch: HatchPattern
+  color: [number, number, number]
+  strokeWidth: number
+  points: MarkupPoint[]
+}
+
+export type MarkupMutationResult =
+  | { ok: true; document: DocumentInfo; markups: MarkupInfo[]; markupsRevision: number }
+  | { ok: false; error: string }
+
 export type PageCropRect = {
   /** Fraction of MediaBox width from left edge (0–1). */
   left: number
@@ -133,6 +196,7 @@ export type PickPdfPathResult = { ok: true; path: string } | null
 
 export const PageDragMime = 'application/x-markstratum-page'
 export const TabDragMime = 'application/x-markstratum-tab'
+export const BookmarkDragMime = 'application/x-markstratum-bookmark'
 
 export type RenderPageRequest = {
   documentId: string
@@ -160,6 +224,13 @@ export const IpcChannels = {
   close: 'pdf:close',
   renderPage: 'pdf:renderPage',
   getBookmarks: 'pdf:getBookmarks',
+  createBookmark: 'pdf:createBookmark',
+  renameBookmark: 'pdf:renameBookmark',
+  deleteBookmark: 'pdf:deleteBookmark',
+  moveBookmark: 'pdf:moveBookmark',
+  getMarkups: 'pdf:getMarkups',
+  createMarkup: 'pdf:createMarkup',
+  deleteMarkup: 'pdf:deleteMarkup',
   getFormFields: 'pdf:getFormFields',
   setFormValues: 'pdf:setFormValues',
   getLayers: 'pdf:getLayers',

@@ -7,13 +7,26 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react'
-import { displayPageSize, type DocumentInfo, type FormFieldInfo, type FormValueUpdate, type ViewMode } from '../../shared/ipc'
+import {
+  displayPageSize,
+  type DocumentInfo,
+  type FormFieldInfo,
+  type FormValueUpdate,
+  type MarkupInfo,
+  type MarkupPoint,
+  type MarkupTool,
+  type ViewMode,
+} from '../../shared/ipc'
+import type { MarkupDrawStyle } from '../markup/markupState'
 import { FormFieldOverlays } from './FormFieldOverlays'
+import { MarkupDrawingLayer } from './MarkupDrawingLayer'
+import { MarkupOverlay } from './MarkupOverlay'
 
 const PAGE_GAP = 12
 const PREFETCH_BEHIND = 2
 const PREFETCH_AHEAD = 5
-const RENDER_CONCURRENCY = 4
+// Native PDFium is concurrency(1); a small pool limits abandoned queued renders.
+const RENDER_CONCURRENCY = 2
 
 type PdfViewportProps = {
   document: DocumentInfo | null
@@ -36,6 +49,18 @@ type PdfViewportProps = {
   layersRevision?: number
   pagesRevision?: number
   onFormValuesChange?: (updates: FormValueUpdate[]) => void
+  activeMarkupTool?: MarkupTool | null
+  markupStyle?: MarkupDrawStyle
+  markupAuthor?: string
+  markups?: MarkupInfo[]
+  onCreateMarkup?: (input: {
+    pageIndex: number
+    tool: MarkupTool
+    author: string
+    style: MarkupDrawStyle
+    points: MarkupPoint[]
+    contents?: string
+  }) => void
 }
 
 type PageImage = {
@@ -43,6 +68,7 @@ type PageImage = {
   width: number
   height: number
   scale: number
+  contentRevision?: string
 }
 
 export function PdfViewport({
@@ -61,6 +87,11 @@ export function PdfViewport({
   layersRevision = 0,
   pagesRevision = 0,
   onFormValuesChange,
+  activeMarkupTool = null,
+  markupStyle,
+  markupAuthor = 'Unknown',
+  markups = [],
+  onCreateMarkup,
 }: PdfViewportProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const drawingRef = useRef<HTMLDivElement>(null)
@@ -75,10 +106,12 @@ export function PdfViewport({
   const lastScrollTop = useRef(0)
   const scrollDirection = useRef(1)
   const imagesRef = useRef(images)
+  const pageIndexRef = useRef(pageIndex)
   const documentPath = document?.path ?? null
   const renderGen = useRef(0)
 
   imagesRef.current = images
+  pageIndexRef.current = pageIndex
 
   const pageLayouts = useMemo(() => {
     if (!document) {
@@ -114,7 +147,6 @@ export function PdfViewport({
     if (formRevision <= 0 && layersRevision <= 0 && pagesRevision <= 0) {
       return
     }
-    setImages({})
     renderGen.current += 1
   }, [formRevision, layersRevision, pagesRevision])
 
@@ -128,7 +160,8 @@ export function PdfViewport({
     }
 
     const generation = renderGen.current
-    const center = visiblePages[0] ?? pageIndex
+    const contentRevision = `${formRevision}.${layersRevision}.${pagesRevision}`
+    const center = visiblePages[0] ?? pageIndexRef.current
     const behind = scrollDirection.current < 0 ? PREFETCH_AHEAD : PREFETCH_BEHIND
     const ahead = scrollDirection.current < 0 ? PREFETCH_BEHIND : PREFETCH_AHEAD
     const targets = prioritizePages(
@@ -136,7 +169,10 @@ export function PdfViewport({
       center,
     ).filter((index) => {
       const existing = imagesRef.current[index]
-      return !existing || Math.abs(existing.scale - scale) >= 0.001
+      if (!existing || Math.abs(existing.scale - scale) >= 0.001) {
+        return true
+      }
+      return existing.contentRevision !== contentRevision
     })
 
     if (targets.length === 0) {
@@ -149,32 +185,20 @@ export function PdfViewport({
       if (cancelled || generation !== renderGen.current) {
         return
       }
-      const existing = imagesRef.current[index]
-      if (existing && Math.abs(existing.scale - scale) < 0.001) {
-        return
-      }
       try {
         const rendered = await renderPageToUrl({
           documentId: document.documentId,
           pageIndex: index,
           scale,
-          requestId: `${generation}-${index}-${scale}`,
+          requestId: `${generation}-${index}-${scale}-${contentRevision}`,
         })
-        // Apply finished work even if this effect was superseded by a scroll
-        // update, as long as the document scale generation is still current.
         if (generation !== renderGen.current) {
           return
         }
-        setImages((prev) => {
-          const current = prev[index]
-          if (current && Math.abs(current.scale - rendered.scale) < 0.001) {
-            return prev
-          }
-          return {
-            ...prev,
-            [index]: rendered,
-          }
-        })
+        setImages((prev) => ({
+          ...prev,
+          [index]: { ...rendered, contentRevision },
+        }))
       } catch (error) {
         if (generation === renderGen.current) {
           const message = error instanceof Error ? error.message : String(error)
@@ -186,7 +210,17 @@ export function PdfViewport({
     return () => {
       cancelled = true
     }
-  }, [document, documentPath, onRenderError, pageIndex, renderPageToUrl, scale, visiblePages])
+  }, [
+    document,
+    documentPath,
+    formRevision,
+    layersRevision,
+    onRenderError,
+    pagesRevision,
+    renderPageToUrl,
+    scale,
+    visiblePages,
+  ])
 
   useEffect(() => {
     const pageChanged = prevPageIndexForJump.current !== pageIndex
@@ -273,8 +307,11 @@ export function PdfViewport({
     if (viewMode !== 'drawing' || event.button !== 0) {
       return
     }
+    if (activeMarkupTool) {
+      return
+    }
     const target = event.target as HTMLElement | null
-    if (target?.closest('.form-field-control, .form-field-layer label')) {
+    if (target?.closest('.form-field-control, .form-field-layer label, .markup-drawing-layer')) {
       return
     }
     setPanning(true)
@@ -385,6 +422,12 @@ export function PdfViewport({
                     pageHeightPts={page?.height ?? layout.height / scale}
                     scale={scale}
                     onFormValuesChange={onFormValuesChange}
+                    documentId={document.documentId}
+                    activeMarkupTool={activeMarkupTool}
+                    markupStyle={markupStyle}
+                    markupAuthor={markupAuthor}
+                    markups={markups}
+                    onCreateMarkup={onCreateMarkup}
                   />
                 )
               })}
@@ -419,6 +462,12 @@ export function PdfViewport({
                 pageHeightPts={page?.height ?? layout.height / scale}
                 scale={scale}
                 onFormValuesChange={onFormValuesChange}
+                documentId={document.documentId}
+                activeMarkupTool={activeMarkupTool}
+                markupStyle={markupStyle}
+                markupAuthor={markupAuthor}
+                markups={markups}
+                onCreateMarkup={onCreateMarkup}
               />
             )
           })}
@@ -445,6 +494,12 @@ function PageSlot({
   pageHeightPts = 0,
   scale = 1,
   onFormValuesChange,
+  documentId,
+  activeMarkupTool = null,
+  markupStyle,
+  markupAuthor = 'Unknown',
+  markups = [],
+  onCreateMarkup,
 }: {
   width: number
   height: number
@@ -455,6 +510,19 @@ function PageSlot({
   pageHeightPts?: number
   scale?: number
   onFormValuesChange?: (updates: FormValueUpdate[]) => void
+  documentId?: string
+  activeMarkupTool?: MarkupTool | null
+  markupStyle?: MarkupDrawStyle
+  markupAuthor?: string
+  markups?: MarkupInfo[]
+  onCreateMarkup?: (input: {
+    pageIndex: number
+    tool: MarkupTool
+    author: string
+    style: MarkupDrawStyle
+    points: MarkupPoint[]
+    contents?: string
+  }) => void
 }) {
   return (
     <div className="page-slot" style={{ width, height }}>
@@ -470,6 +538,23 @@ function PageSlot({
           pageHeightPts={pageHeightPts}
           scale={scale}
           onValuesChange={onFormValuesChange}
+        />
+      ) : null}
+      <MarkupOverlay
+        markups={markups}
+        pageIndex={pageIndex}
+        pageHeightPts={pageHeightPts}
+        scale={scale}
+      />
+      {documentId && activeMarkupTool && markupStyle && onCreateMarkup ? (
+        <MarkupDrawingLayer
+          pageIndex={pageIndex}
+          pageHeightPts={pageHeightPts}
+          scale={scale}
+          tool={activeMarkupTool}
+          style={markupStyle}
+          author={markupAuthor}
+          onCreate={onCreateMarkup}
         />
       ) : null}
     </div>

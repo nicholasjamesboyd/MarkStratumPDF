@@ -2,12 +2,16 @@ import path from 'node:path'
 import { copyFile, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import type {
+  BookmarkMutationResult,
   BookmarkNode,
   DocumentInfo,
   FormFieldInfo,
   FormValueUpdate,
   LayerInfo,
   LayerMutationResult,
+  MarkupCreateRequest,
+  MarkupInfo,
+  MarkupMutationResult,
   OpenDocumentResult,
   PageMutationResult,
   PickPdfPathResult,
@@ -19,6 +23,18 @@ import type {
   SaveDocumentResult,
   SetFormValuesResult,
 } from '../../../shared/ipc'
+import {
+  createAnnotationInBytes,
+  deleteAnnotationInBytes,
+  listAnnotationsFromBytes,
+} from './annotationService'
+import {
+  createBookmarkInBytes,
+  deleteBookmarkInBytes,
+  listBookmarksFromBytes,
+  moveBookmarkInBytes,
+  renameBookmarkInBytes,
+} from './bookmarkService'
 import { writeFormValues } from './formWriter'
 import {
   createLayerInBytes,
@@ -56,9 +72,11 @@ type OpenDocument = {
   formValues: Map<string, string>
   dirty: boolean
   password?: string
-  /** Temp PDF with pending layer or page edits; PDFium renders from this when set. */
+  /** Temp PDF with pending layer, bookmark, or page edits; PDFium renders from this when set. */
   workPath?: string
   layersRevision: number
+  bookmarksRevision: number
+  markupsRevision: number
   pagesRevision: number
 }
 
@@ -111,6 +129,8 @@ export class DocumentSession {
         dirty: false,
         password,
         layersRevision: 0,
+        bookmarksRevision: 0,
+        markupsRevision: 0,
         pagesRevision: 0,
       })
       return { ok: true, document: toDocumentInfo(this.documents.get(handle.id)!) }
@@ -177,7 +197,78 @@ export class DocumentSession {
     if (!entry) {
       throw new Error(`No document open: ${documentId}`)
     }
-    return this.engine.getBookmarks(entry.handle)
+    const bytes = await readFile(renderPath(entry))
+    return listBookmarksFromBytes(bytes)
+  }
+
+  async createBookmark(
+    documentId: string,
+    pageIndex: number,
+    title?: string,
+    parentId?: string | null,
+  ): Promise<BookmarkMutationResult> {
+    return this.mutateBookmarks(documentId, async (bytes) => {
+      const result = await createBookmarkInBytes(
+        bytes,
+        pageIndex,
+        title?.trim() || `Page ${pageIndex + 1}`,
+        parentId,
+      )
+      return result.bytes
+    })
+  }
+
+  async renameBookmark(
+    documentId: string,
+    bookmarkId: string,
+    title: string,
+  ): Promise<BookmarkMutationResult> {
+    return this.mutateBookmarks(documentId, (bytes) =>
+      renameBookmarkInBytes(bytes, bookmarkId, title),
+    )
+  }
+
+  async deleteBookmark(
+    documentId: string,
+    bookmarkId: string,
+  ): Promise<BookmarkMutationResult> {
+    return this.mutateBookmarks(documentId, (bytes) =>
+      deleteBookmarkInBytes(bytes, bookmarkId),
+    )
+  }
+
+  async moveBookmark(
+    documentId: string,
+    bookmarkId: string,
+    parentId: string | null,
+    index: number,
+  ): Promise<BookmarkMutationResult> {
+    return this.mutateBookmarks(documentId, (bytes) =>
+      moveBookmarkInBytes(bytes, bookmarkId, parentId, index),
+    )
+  }
+
+  async getMarkups(documentId: string): Promise<MarkupInfo[]> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      throw new Error(`No document open: ${documentId}`)
+    }
+    const bytes = await readFile(renderPath(entry))
+    return listAnnotationsFromBytes(bytes)
+  }
+
+  async createMarkup(
+    documentId: string,
+    request: MarkupCreateRequest,
+  ): Promise<MarkupMutationResult> {
+    return this.mutateMarkups(documentId, async (bytes) => {
+      const result = await createAnnotationInBytes(bytes, request)
+      return result.bytes
+    })
+  }
+
+  async deleteMarkup(documentId: string, markupId: string): Promise<MarkupMutationResult> {
+    return this.mutateMarkups(documentId, (bytes) => deleteAnnotationInBytes(bytes, markupId))
   }
 
   async getFormFields(documentId: string): Promise<FormFieldInfo[]> {
@@ -501,6 +592,60 @@ export class DocumentSession {
         document: toDocumentInfo(entry),
         pagesRevision: entry.pagesRevision,
         savedPath: afterDestPath,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
+  private async mutateBookmarks(
+    documentId: string,
+    mutate: (bytes: Uint8Array) => Promise<Uint8Array>,
+  ): Promise<BookmarkMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+
+    try {
+      const sourceBytes = await readFile(renderPath(entry))
+      const nextBytes = await mutate(sourceBytes)
+      await this.commitWorkingPdf(entry, nextBytes, { refreshPages: false })
+      entry.bookmarksRevision += 1
+      const bookmarks = await listBookmarksFromBytes(nextBytes)
+      return {
+        ok: true,
+        document: toDocumentInfo(entry),
+        bookmarks,
+        bookmarksRevision: entry.bookmarksRevision,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
+  }
+
+  private async mutateMarkups(
+    documentId: string,
+    mutate: (bytes: Uint8Array) => Promise<Uint8Array>,
+  ): Promise<MarkupMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+
+    try {
+      const sourceBytes = await readFile(renderPath(entry))
+      const nextBytes = await mutate(sourceBytes)
+      await this.commitWorkingPdf(entry, nextBytes, { refreshPages: false })
+      entry.markupsRevision += 1
+      const markups = await listAnnotationsFromBytes(nextBytes)
+      return {
+        ok: true,
+        document: toDocumentInfo(entry),
+        markups,
+        markupsRevision: entry.markupsRevision,
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

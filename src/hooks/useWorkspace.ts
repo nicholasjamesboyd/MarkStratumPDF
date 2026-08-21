@@ -19,6 +19,8 @@ export type TabState = {
   formFields: FormFieldInfo[]
   formRevision: number
   layersRevision: number
+  bookmarksRevision: number
+  markupsRevision: number
   pagesRevision: number
 }
 
@@ -132,6 +134,8 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
         formFields: [],
         formRevision: 0,
         layersRevision: 0,
+        bookmarksRevision: 0,
+        markupsRevision: 0,
         pagesRevision: 0,
       }
       setTabs((prev) => [...prev, next])
@@ -276,6 +280,46 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
                 ...tab,
                 document: result.document,
                 layersRevision: result.layersRevision,
+              }
+            : tab,
+        ),
+      )
+    },
+    [],
+  )
+
+  const applyBookmarksChanged = useCallback(
+    (result: {
+      document: DocumentInfo
+      bookmarksRevision: number
+    }) => {
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === result.document.documentId
+            ? {
+                ...tab,
+                document: result.document,
+                bookmarksRevision: result.bookmarksRevision,
+              }
+            : tab,
+        ),
+      )
+    },
+    [],
+  )
+
+  const applyMarkupsChanged = useCallback(
+    (result: {
+      document: DocumentInfo
+      markupsRevision: number
+    }) => {
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === result.document.documentId
+            ? {
+                ...tab,
+                document: result.document,
+                markupsRevision: result.markupsRevision,
               }
             : tab,
         ),
@@ -533,6 +577,8 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     saveFocusedDocumentAs,
     setFormValuesForDocument,
     applyLayersChanged,
+    applyBookmarksChanged,
+    applyMarkupsChanged,
     applyPagesChanged,
     toggleSplit,
     setSplitSizes,

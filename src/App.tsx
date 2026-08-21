@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { FitMode, ViewMode } from '../shared/ipc'
+import type { FitMode, MarkupTool, ViewMode } from '../shared/ipc'
+import { MarkupListPanel } from './components/MarkupListPanel'
 import { PasswordDialog } from './components/PasswordDialog'
 import { PdfViewport } from './components/PdfViewport'
 import { SplitWorkspace } from './components/SplitWorkspace'
@@ -8,7 +9,14 @@ import { TabBar } from './components/TabBar'
 import { ToolShelf } from './components/ToolShelf'
 import { Toolbar } from './components/Toolbar'
 import { useRecentFiles } from './hooks/useRecentFiles'
+import { useMarkups } from './hooks/useMarkups'
 import { useWorkspace, type TabState } from './hooks/useWorkspace'
+import {
+  DEFAULT_MARKUP_STYLE,
+  authorOrUnknown,
+  readAuthorName,
+  type MarkupDrawStyle,
+} from './markup/markupState'
 
 const ZOOM_STEP = 1.15
 
@@ -42,11 +50,23 @@ export default function App() {
     setFocusedPane,
     setFormValuesForDocument,
     applyLayersChanged,
+    applyBookmarksChanged,
+    applyMarkupsChanged,
     applyPagesChanged,
   } = useWorkspace({ onDocumentOpened: recordOpen })
 
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 })
+  const [activeMarkupTool, setActiveMarkupTool] = useState<MarkupTool | null>(null)
+  const [markupStyle, setMarkupStyle] = useState<MarkupDrawStyle>(DEFAULT_MARKUP_STYLE)
+  const [markupAuthor, setMarkupAuthor] = useState(() => authorOrUnknown(readAuthorName()))
   const startupOpenPathRef = useRef<string | null | undefined>(undefined)
+
+  const { markups, createMarkup, deleteMarkup } = useMarkups({
+    documentId: focusedTab?.document.documentId ?? null,
+    markupsRevision: focusedTab?.markupsRevision ?? 0,
+    onPersisted: applyMarkupsChanged,
+    onError: setError,
+  })
 
   const currentPage = focusedTab?.document.pages[focusedTab.pageIndex]
 
@@ -252,6 +272,15 @@ export default function App() {
         onFormValuesChange={(updates) => {
           void setFormValuesForDocument(tab.document.documentId, updates)
         }}
+        activeMarkupTool={activeMarkupTool}
+        markupStyle={markupStyle}
+        markupAuthor={markupAuthor}
+        markups={
+          tab.document.documentId === focusedTab?.document.documentId ? markups : []
+        }
+        onCreateMarkup={
+          tab.document.documentId === focusedTab?.document.documentId ? createMarkup : undefined
+        }
       />
     )
   }
@@ -279,6 +308,7 @@ export default function App() {
           pageIndex={focusedTab?.pageIndex ?? 0}
           pagesRevision={focusedTab?.pagesRevision ?? 0}
           layersRevision={focusedTab?.layersRevision ?? 0}
+          bookmarksRevision={focusedTab?.bookmarksRevision ?? 0}
           renderPageToUrl={renderPageToUrl}
           onGoToBookmarkPage={(pageIndex) => {
             if (!focusedTabId || !focusedTab) {
@@ -295,6 +325,12 @@ export default function App() {
             void openPath(filePath)
           }}
           onLayersChanged={applyLayersChanged}
+          onBookmarksChanged={applyBookmarksChanged}
+          activeMarkupTool={activeMarkupTool}
+          markupStyle={markupStyle}
+          onActiveMarkupToolChange={setActiveMarkupTool}
+          onMarkupStyleChange={setMarkupStyle}
+          onMarkupAuthorChange={setMarkupAuthor}
           onError={setError}
         />
 
@@ -356,6 +392,20 @@ export default function App() {
           if (focusedTabId) {
             updateTab(focusedTabId, { pageIndex })
           }
+        }}
+      />
+
+      <MarkupListPanel
+        documentId={focusedTab?.document.documentId ?? null}
+        markups={markups}
+        onDeleteMarkup={deleteMarkup}
+        onGoToPage={(pageIndex) => {
+          if (!focusedTabId || !focusedTab) {
+            return
+          }
+          const maxIndex = Math.max(0, focusedTab.document.pageCount - 1)
+          const nextIndex = Math.min(maxIndex, Math.max(0, pageIndex))
+          updateTab(focusedTabId, { pageIndex: nextIndex })
         }}
       />
 

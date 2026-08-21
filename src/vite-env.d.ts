@@ -1,12 +1,16 @@
 /// <reference types="vite/client" />
 
 import type {
+  BookmarkMutationResult,
   BookmarkNode,
   ExtractPagesResult,
   FormFieldInfo,
   FormValueUpdate,
   LayerInfo,
   LayerMutationResult,
+  MarkupCreateRequest,
+  MarkupInfo,
+  MarkupMutationResult,
   MenuZoomCommand,
   OpenDocumentResult,
   PageCropRect,
@@ -26,6 +30,33 @@ type MarkStratumApi = {
   closeDocument: (documentId: string) => Promise<void>
   renderPage: (req: RenderPageRequest) => Promise<RenderedPage>
   getBookmarks: (documentId: string) => Promise<BookmarkNode[]>
+  createBookmark: (
+    documentId: string,
+    pageIndex: number,
+    title?: string,
+    parentId?: string | null,
+  ) => Promise<BookmarkMutationResult>
+  renameBookmark: (
+    documentId: string,
+    bookmarkId: string,
+    title: string,
+  ) => Promise<BookmarkMutationResult>
+  deleteBookmark: (
+    documentId: string,
+    bookmarkId: string,
+  ) => Promise<BookmarkMutationResult>
+  moveBookmark: (
+    documentId: string,
+    bookmarkId: string,
+    parentId: string | null,
+    index: number,
+  ) => Promise<BookmarkMutationResult>
+  getMarkups: (documentId: string) => Promise<MarkupInfo[]>
+  createMarkup: (
+    documentId: string,
+    request: MarkupCreateRequest,
+  ) => Promise<MarkupMutationResult>
+  deleteMarkup: (documentId: string, markupId: string) => Promise<MarkupMutationResult>
   getFormFields: (documentId: string) => Promise<FormFieldInfo[]>
   setFormValues: (
     documentId: string,

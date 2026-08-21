@@ -43,7 +43,7 @@ flowchart TB
 ## Long-term feature phases
 
 1. **Multi-doc shell:** tabs, thumbnails, drag-drop open across documents
-2. **Markups:** highlight, pen, shapes, text; write standard PDF annotations for compatibility
+2. **Markups:** highlight, pen, shapes, text; write standard PDF annotations for compatibility *(create/list/delete shipped; edit geometry and layer assignment still open)*
 3. **Measure and stamp:** calibrated scale, length/area, stamp library
 4. **Page ops:** reorder, extract, insert, combine, drag pages between docs
 5. **Flatten / forms / layers:** annotation flatten, AcroForm fill, OCG layer visibility (list / toggle / create / rename / delete; assign new markups to layers later)
@@ -67,9 +67,11 @@ flowchart TB
 
 ### Out of MVP (still planned above)
 
-- Tabs, markups, measure, stamps, edit/combine, flatten, forms, OCR, cloud/sync
+- Measure, stamps, edit/combine, flatten, OCR, cloud/sync
 
-OCG layer list/toggle/create/rename/delete is implemented in the app shell (mutate `OCProperties`, reload into PDFium). Assigning new markups to an active layer waits on the markup phase.
+OCG layer list/toggle/create/rename/delete is implemented in the app shell (mutate `OCProperties`, reload into PDFium). Assigning new markups to an active layer is still open.
+
+Markup tools (line, shapes, cloud/callout, text, pen, highlighter) write standard PDF annotations via pdf-lib, list authors from `/T`, and re-render through PDFium. Hatch fills bake into appearance streams for closed shapes.
 
 ### Known MVP follow-ups (before or alongside phase 1)
 
@@ -164,13 +166,13 @@ Rendered page payloads cross IPC as base64 JPEG for reliable cloning through the
 
 ## Suggested next implementation order
 
-1. Multi-document tabs + thumbnail strip
-2. Annotation model backed by PDF annotation objects (read first, then create/edit)
-3. Markup tools (highlight, pen, rectangle, text)
-4. Save / Save As preserving annotations
+1. Multi-document tabs + thumbnail strip *(done)*
+2. Annotation model backed by PDF annotation objects *(done for create/list/delete)*
+3. Markup tools (highlight, pen, shapes, text) *(done; geometry edit still open)*
+4. Save / Save As preserving annotations *(working-file path already includes annots)*
 5. Measure + stamp
-6. Page assemble/extract/combine
-7. Flatten, forms, layers
+6. Page assemble/extract/combine *(largely done in Pages panel)*
+7. Flatten; assign markups to layers
 8. OCR (Tesseract) and content rewrite
 
 ## Success criteria (product)

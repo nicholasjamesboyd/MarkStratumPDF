@@ -222,12 +222,16 @@ select {
 }
 
 .pages-panel-tool {
-  padding: 0.22rem 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--panel-elevated);
   color: var(--text);
-  font-size: 0.68rem;
   cursor: pointer;
 }
 
@@ -672,11 +676,109 @@ select {
   padding: 0.25rem 0 0.5rem;
 }
 
+.bookmarks-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.bookmarks-toolbar {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.bookmarks-new-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 1.7rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-elevated);
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
+.bookmarks-new-button {
+  flex: 0 0 auto;
+  height: 1.7rem;
+  padding: 0 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-elevated);
+  color: var(--text);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.bookmarks-new-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bookmarks-new-button:disabled,
+.bookmarks-new-input:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .bookmark-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.15rem;
   min-width: 0;
+  min-height: 1.7rem;
+  padding-right: 0.35rem;
+}
+
+.bookmark-row.dragging {
+  opacity: 0.45;
+}
+
+.bookmark-row.drop-before::before,
+.bookmark-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0.35rem;
+  right: 0.35rem;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.bookmark-row.drop-before::before {
+  top: 0;
+}
+
+.bookmark-row.drop-after::after {
+  bottom: 0;
+}
+
+.bookmark-row.drop-into {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.bookmark-drop-end {
+  position: relative;
+  min-height: 1.25rem;
+  margin: 0 0.5rem 0.5rem;
+}
+
+.bookmark-drop-end.drop-before::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0.4rem;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
 }
 
 .bookmark-toggle,
@@ -741,6 +843,52 @@ select {
   flex: 0 0 auto;
   font-size: 0.7rem;
   color: var(--muted);
+}
+
+.bookmark-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 1.45rem;
+  margin: 0 0.15rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--panel-elevated);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.bookmark-actions {
+  display: none;
+  flex: 0 0 auto;
+  gap: 0.2rem;
+}
+
+.bookmark-row:hover .bookmark-actions,
+.bookmark-row:focus-within .bookmark-actions {
+  display: inline-flex;
+}
+
+.bookmark-action {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.68rem;
+  padding: 0.15rem 0.3rem;
+  cursor: pointer;
+}
+
+.bookmark-action:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.bookmark-action-danger:hover:not(:disabled) {
+  color: #e07070;
+}
+
+.bookmark-action:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .layers-panel {
@@ -1351,4 +1499,254 @@ select {
   padding: 0.4rem 0.75rem;
   z-index: 5;
   max-width: min(36rem, calc(100% - 2rem));
+}
+
+.markup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem 0.75rem;
+  min-height: 0;
+}
+
+.markup-author-field,
+.markup-style-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.markup-field-label {
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.markup-author-field input[type='text'],
+.markup-style-field input[type='number'],
+.markup-style-field select {
+  height: 1.7rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-elevated);
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
+.markup-style-field input[type='color'] {
+  width: 100%;
+  height: 1.7rem;
+  padding: 0.1rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-elevated);
+  cursor: pointer;
+}
+
+.markup-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.markup-tool {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-elevated);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.markup-tool:hover {
+  border-color: var(--border-hover);
+}
+
+.markup-tool.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.markup-style-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.markup-style-row .markup-style-field:last-child {
+  grid-column: 1 / -1;
+}
+
+.markup-list-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  min-height: 0;
+}
+
+.markup-list-panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  height: 1.75rem;
+  padding: 0 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.markup-list-panel-toggle:hover {
+  background: var(--panel-elevated);
+}
+
+.markup-list-panel-chevron {
+  color: var(--muted);
+  font-size: 0.75rem;
+  width: 0.75rem;
+}
+
+.markup-list-panel-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.markup-list-panel-count {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.markup-list-panel-body {
+  max-height: 10rem;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  padding: 0.35rem 0.55rem 0.55rem;
+}
+
+.markup-list-header {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--border);
+}
+
+.markup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.markup-list-item {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.markup-list-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.markup-list-main:hover {
+  background: var(--panel-elevated);
+  border-color: var(--border);
+}
+
+.markup-list-icon {
+  display: inline-flex;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.markup-list-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.markup-list-title {
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.markup-list-meta {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.markup-list-delete {
+  flex: 0 0 auto;
+  align-self: center;
+  height: 1.55rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-elevated);
+  color: var(--muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.markup-list-delete:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.markup-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.markup-overlay-layer svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.markup-drawing-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.markup-drawing-layer svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
 }

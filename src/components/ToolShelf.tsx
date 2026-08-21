@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
-import type { DocumentInfo, LayerInfo, PageInfo } from '../../shared/ipc'
+import type { BookmarkNode, DocumentInfo, LayerInfo, MarkupTool, PageInfo } from '../../shared/ipc'
 import type { RecentFileEntry } from '../hooks/useRecentFiles'
+import type { MarkupDrawStyle } from '../markup/markupState'
 import { BookmarksPanel } from './panels/BookmarksPanel'
 import { LayersPanel } from './panels/LayersPanel'
+import { MarkupPanel } from './panels/MarkupPanel'
 import { PagesPanel, type PagesChangedKind } from './panels/PagesPanel'
 import { RecentFilesPanel } from './panels/RecentFilesPanel'
 
@@ -13,10 +15,10 @@ const PAGES_PANEL_DEFAULT_WIDTH = 384
 const PAGES_PANEL_MIN_WIDTH = 288
 const PAGES_PANEL_MAX_WIDTH = 576
 
-type ToolId = 'pages' | 'recent' | 'bookmarks' | 'layers'
+type ToolId = 'pages' | 'recent' | 'bookmarks' | 'layers' | 'markup'
 
-const ALL_TOOL_IDS: ToolId[] = ['recent', 'pages', 'bookmarks', 'layers']
-const DEFAULT_TOOL_ORDER: ToolId[] = ['recent', 'pages', 'bookmarks', 'layers']
+const ALL_TOOL_IDS: ToolId[] = ['recent', 'pages', 'bookmarks', 'layers', 'markup']
+const DEFAULT_TOOL_ORDER: ToolId[] = ['recent', 'pages', 'bookmarks', 'layers', 'markup']
 
 function readStoredToolOrder(): ToolId[] {
   try {
@@ -71,6 +73,7 @@ type ToolShelfProps = {
   pageIndex: number
   pagesRevision: number
   layersRevision: number
+  bookmarksRevision: number
   renderPageToUrl: (req: {
     documentId: string
     pageIndex: number
@@ -89,6 +92,16 @@ type ToolShelfProps = {
     layers: LayerInfo[]
     layersRevision: number
   }) => void
+  onBookmarksChanged: (result: {
+    document: DocumentInfo
+    bookmarks: BookmarkNode[]
+    bookmarksRevision: number
+  }) => void
+  activeMarkupTool: MarkupTool | null
+  markupStyle: MarkupDrawStyle
+  onActiveMarkupToolChange: (tool: MarkupTool | null) => void
+  onMarkupStyleChange: (style: MarkupDrawStyle) => void
+  onMarkupAuthorChange: (author: string) => void
   onError: (message: string) => void
 }
 
@@ -195,6 +208,29 @@ function LayersIcon() {
   )
 }
 
+function MarkupIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 14.5 12.5 6l2.5 2.5L6.5 17H4v-2.5z"
+      />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m11.2 7.3 1.5-1.5a1.6 1.6 0 0 1 2.3 2.3L13.5 9.6"
+      />
+    </svg>
+  )
+}
+
 export function ToolShelf({
   recentEntries,
   onOpenRecent,
@@ -204,11 +240,18 @@ export function ToolShelf({
   pageIndex,
   pagesRevision,
   layersRevision,
+  bookmarksRevision,
   renderPageToUrl,
   onGoToBookmarkPage,
   onPagesChanged,
   onOpenFilePath,
   onLayersChanged,
+  onBookmarksChanged,
+  activeMarkupTool,
+  markupStyle,
+  onActiveMarkupToolChange,
+  onMarkupStyleChange,
+  onMarkupAuthorChange,
   onError,
 }: ToolShelfProps) {
   const [activeToolId, setActiveToolId] = useState<ToolId | null>(null)
@@ -294,7 +337,14 @@ export function ToolShelf({
         label: 'Bookmarks',
         icon: <BookmarkIcon />,
         renderPanel: () => (
-          <BookmarksPanel documentId={documentId} onGoToPage={onGoToBookmarkPage} />
+          <BookmarksPanel
+            documentId={documentId}
+            pageIndex={pageIndex}
+            bookmarksRevision={bookmarksRevision}
+            onBookmarksChanged={onBookmarksChanged}
+            onGoToPage={onGoToBookmarkPage}
+            onError={onError}
+          />
         ),
       },
       layers: {
@@ -310,14 +360,36 @@ export function ToolShelf({
           />
         ),
       },
+      markup: {
+        id: 'markup',
+        label: 'Markup',
+        icon: <MarkupIcon />,
+        renderPanel: () => (
+          <MarkupPanel
+            documentId={documentId}
+            activeTool={activeMarkupTool}
+            style={markupStyle}
+            onActiveToolChange={onActiveMarkupToolChange}
+            onStyleChange={onMarkupStyleChange}
+            onAuthorChange={onMarkupAuthorChange}
+          />
+        ),
+      },
     }),
     [
+      activeMarkupTool,
+      bookmarksRevision,
       documentId,
       layersRevision,
+      markupStyle,
+      onActiveMarkupToolChange,
+      onBookmarksChanged,
       onClearRecent,
       onError,
       onGoToBookmarkPage,
       onLayersChanged,
+      onMarkupAuthorChange,
+      onMarkupStyleChange,
       onOpenFilePath,
       onOpenRecent,
       onPagesChanged,

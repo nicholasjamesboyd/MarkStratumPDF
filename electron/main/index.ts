@@ -6,6 +6,7 @@ import os from 'node:os'
 import {
   IpcChannels,
   type FormValueUpdate,
+  type MarkupCreateRequest,
   type OpenDocumentResult,
   type RenderPageRequest,
   type SaveDocumentResult,
@@ -191,6 +192,64 @@ function registerIpc() {
   ipcMain.handle(IpcChannels.getBookmarks, async (_event, documentId: string) => {
     return session.getBookmarks(documentId)
   })
+
+  ipcMain.handle(
+    IpcChannels.createBookmark,
+    async (
+      _event,
+      documentId: string,
+      pageIndex: number,
+      title?: string,
+      parentId?: string | null,
+    ) => {
+      return session.createBookmark(documentId, pageIndex, title, parentId)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.renameBookmark,
+    async (_event, documentId: string, bookmarkId: string, title: string) => {
+      return session.renameBookmark(documentId, bookmarkId, title)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.deleteBookmark,
+    async (_event, documentId: string, bookmarkId: string) => {
+      return session.deleteBookmark(documentId, bookmarkId)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.moveBookmark,
+    async (
+      _event,
+      documentId: string,
+      bookmarkId: string,
+      parentId: string | null,
+      index: number,
+    ) => {
+      return session.moveBookmark(documentId, bookmarkId, parentId, index)
+    },
+  )
+
+  ipcMain.handle(IpcChannels.getMarkups, async (_event, documentId: string) => {
+    return session.getMarkups(documentId)
+  })
+
+  ipcMain.handle(
+    IpcChannels.createMarkup,
+    async (_event, documentId: string, request: MarkupCreateRequest) => {
+      return session.createMarkup(documentId, request)
+    },
+  )
+
+  ipcMain.handle(
+    IpcChannels.deleteMarkup,
+    async (_event, documentId: string, markupId: string) => {
+      return session.deleteMarkup(documentId, markupId)
+    },
+  )
 
   ipcMain.handle(IpcChannels.getFormFields, async (_event, documentId: string) => {
     return session.getFormFields(documentId)

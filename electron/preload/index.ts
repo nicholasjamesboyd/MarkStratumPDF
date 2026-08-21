@@ -1,11 +1,15 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
   IpcChannels,
+  type BookmarkMutationResult,
   type BookmarkNode,
   type FormFieldInfo,
   type FormValueUpdate,
   type LayerInfo,
   type LayerMutationResult,
+  type MarkupCreateRequest,
+  type MarkupInfo,
+  type MarkupMutationResult,
   type MenuZoomCommand,
   type OpenDocumentResult,
   type PageCropRect,
@@ -26,6 +30,33 @@ export type MarkStratumApi = {
   closeDocument: (documentId: string) => Promise<void>
   renderPage: (req: RenderPageRequest) => Promise<RenderedPage>
   getBookmarks: (documentId: string) => Promise<BookmarkNode[]>
+  createBookmark: (
+    documentId: string,
+    pageIndex: number,
+    title?: string,
+    parentId?: string | null,
+  ) => Promise<BookmarkMutationResult>
+  renameBookmark: (
+    documentId: string,
+    bookmarkId: string,
+    title: string,
+  ) => Promise<BookmarkMutationResult>
+  deleteBookmark: (
+    documentId: string,
+    bookmarkId: string,
+  ) => Promise<BookmarkMutationResult>
+  moveBookmark: (
+    documentId: string,
+    bookmarkId: string,
+    parentId: string | null,
+    index: number,
+  ) => Promise<BookmarkMutationResult>
+  getMarkups: (documentId: string) => Promise<MarkupInfo[]>
+  createMarkup: (
+    documentId: string,
+    request: MarkupCreateRequest,
+  ) => Promise<MarkupMutationResult>
+  deleteMarkup: (documentId: string, markupId: string) => Promise<MarkupMutationResult>
   getFormFields: (documentId: string) => Promise<FormFieldInfo[]>
   setFormValues: (
     documentId: string,
@@ -134,6 +165,19 @@ const api: MarkStratumApi = {
   closeDocument: (documentId) => ipcRenderer.invoke(IpcChannels.close, documentId),
   renderPage: (req) => ipcRenderer.invoke(IpcChannels.renderPage, req),
   getBookmarks: (documentId) => ipcRenderer.invoke(IpcChannels.getBookmarks, documentId),
+  createBookmark: (documentId, pageIndex, title, parentId) =>
+    ipcRenderer.invoke(IpcChannels.createBookmark, documentId, pageIndex, title, parentId),
+  renameBookmark: (documentId, bookmarkId, title) =>
+    ipcRenderer.invoke(IpcChannels.renameBookmark, documentId, bookmarkId, title),
+  deleteBookmark: (documentId, bookmarkId) =>
+    ipcRenderer.invoke(IpcChannels.deleteBookmark, documentId, bookmarkId),
+  moveBookmark: (documentId, bookmarkId, parentId, index) =>
+    ipcRenderer.invoke(IpcChannels.moveBookmark, documentId, bookmarkId, parentId, index),
+  getMarkups: (documentId) => ipcRenderer.invoke(IpcChannels.getMarkups, documentId),
+  createMarkup: (documentId, request) =>
+    ipcRenderer.invoke(IpcChannels.createMarkup, documentId, request),
+  deleteMarkup: (documentId, markupId) =>
+    ipcRenderer.invoke(IpcChannels.deleteMarkup, documentId, markupId),
   getFormFields: (documentId) => ipcRenderer.invoke(IpcChannels.getFormFields, documentId),
   setFormValues: (documentId, updates) =>
     ipcRenderer.invoke(IpcChannels.setFormValues, documentId, updates),

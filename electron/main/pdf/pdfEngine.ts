@@ -195,7 +195,7 @@ export class PdfiumEngine implements PdfEngine {
           format: 'jpeg',
           quality: 80,
           rotation: extraRotation,
-          renderAnnotations: true,
+          renderAnnotations: false,
           output: outputPath,
         })
         const data = readFileSync(outputPath)
@@ -245,6 +245,7 @@ function normalizeRotation(value: number): 0 | 1 | 2 | 3 {
 
 function toBookmarkNode(bookmark: Bookmark): BookmarkNode {
   return {
+    id: '',
     title: bookmark.title,
     pageIndex: bookmark.pageIndex,
     open: bookmark.open,
