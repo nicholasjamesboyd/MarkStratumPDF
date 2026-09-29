@@ -57,6 +57,10 @@ export function buildAppMenu(
           click: () => send(IpcChannels.menuSaveAs),
         },
         {
+          label: 'Flatten Markups',
+          click: () => send(IpcChannels.menuFlatten),
+        },
+        {
           label: 'Close',
           accelerator: 'CmdOrCtrl+W',
           click: () => send(IpcChannels.menuClose),

@@ -1,10 +1,21 @@
 import type { MarkupInfo, MarkupPoint } from '../../shared/ipc'
+import {
+  boxCentre,
+  boxSideAnchor,
+  cloudPolylineFromPolygon,
+  DEFAULT_CLOUD_ARC_RADIUS,
+  sampleArc,
+} from '../../shared/markupGeometry'
 
 type MarkupOverlayProps = {
   markups: MarkupInfo[]
   pageIndex: number
   pageHeightPts: number
   scale: number
+  selectedId?: string | null
+  interactive?: boolean
+  hiddenLayerIds?: ReadonlySet<string>
+  onSelect?: (markupId: string | null) => void
 }
 
 export function MarkupOverlay({
@@ -12,9 +23,22 @@ export function MarkupOverlay({
   pageIndex,
   pageHeightPts,
   scale,
+  selectedId = null,
+  interactive = false,
+  hiddenLayerIds,
+  onSelect,
 }: MarkupOverlayProps) {
-  const pageMarkups = markups.filter((markup) => markup.pageIndex === pageIndex)
-  if (pageMarkups.length === 0) {
+  const pageMarkups = markups.filter((markup) => {
+    if (markup.pageIndex !== pageIndex) {
+      return false
+    }
+    if (markup.layerId && hiddenLayerIds?.has(markup.layerId)) {
+      return false
+    }
+    return true
+  })
+
+  if (pageMarkups.length === 0 && !interactive) {
     return null
   }
 
@@ -24,35 +48,55 @@ export function MarkupOverlay({
   })
 
   return (
-    <div className="markup-overlay-layer" aria-hidden="true">
+    <div
+      className={`markup-overlay-layer${interactive ? ' markup-overlay-interactive' : ''}`}
+      aria-hidden={!interactive}
+      onPointerDown={
+        interactive
+          ? (event) => {
+              if (event.target === event.currentTarget) {
+                onSelect?.(null)
+              }
+            }
+          : undefined
+      }
+    >
       <svg>
+        {interactive ? (
+          <rect
+            className="markup-overlay-deselect"
+            x={0}
+            y={0}
+            width="100%"
+            height="100%"
+            fill="transparent"
+            onPointerDown={(event) => {
+              event.stopPropagation()
+              onSelect?.(null)
+            }}
+          />
+        ) : null}
         <defs>
-          <pattern
-            id="markup-hatch-diagonal"
-            patternUnits="userSpaceOnUse"
-            width="8"
-            height="8"
-            patternTransform="rotate(45)"
-          >
-            <line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" strokeWidth="1.5" />
-          </pattern>
-          <pattern
-            id="markup-hatch-cross"
-            patternUnits="userSpaceOnUse"
-            width="8"
-            height="8"
-          >
-            <path d="M0 0L8 8M8 0L0 8" stroke="currentColor" strokeWidth="1.2" />
-          </pattern>
+          {pageMarkups.map((markup) => hatchDefs(markup, scale))}
         </defs>
         {pageMarkups.map((markup) => (
           <g
             key={markup.id}
+            className={selectedId === markup.id ? 'markup-selected' : undefined}
             style={{
-              color: rgbCss(markup.color),
+              color: rgbCss(markup.hatchColor ?? markup.color),
+              cursor: interactive ? 'pointer' : undefined,
             }}
+            onPointerDown={
+              interactive
+                ? (event) => {
+                    event.stopPropagation()
+                    onSelect?.(markup.id)
+                  }
+                : undefined
+            }
           >
-            {renderMarkup(markup, toScreen, scale)}
+            {renderMarkup(markup, toScreen, scale, selectedId === markup.id)}
           </g>
         ))}
       </svg>
@@ -60,21 +104,66 @@ export function MarkupOverlay({
   )
 }
 
+function hatchDefs(markup: MarkupInfo, scale: number) {
+  const spacing = Math.max(4, 8 * (markup.hatchScale || 1) * Math.max(0.5, scale))
+  const color = rgbCss(markup.hatchColor ?? markup.color)
+  if (markup.hatch === 'none') {
+    return null
+  }
+  if (markup.hatch === 'diagonal') {
+    return (
+      <pattern
+        key={`hatch-d-${markup.id}`}
+        id={`markup-hatch-diagonal-${markup.id}`}
+        patternUnits="userSpaceOnUse"
+        width={spacing}
+        height={spacing}
+        patternTransform="rotate(45)"
+      >
+        <line x1="0" y1="0" x2="0" y2={spacing} stroke={color} strokeWidth="1.5" />
+      </pattern>
+    )
+  }
+  return (
+    <pattern
+      key={`hatch-c-${markup.id}`}
+      id={`markup-hatch-cross-${markup.id}`}
+      patternUnits="userSpaceOnUse"
+      width={spacing}
+      height={spacing}
+    >
+      <path
+        d={`M0 0L${spacing} ${spacing}M${spacing} 0L0 ${spacing}`}
+        stroke={color}
+        strokeWidth="1.2"
+      />
+    </pattern>
+  )
+}
+
 function renderMarkup(
   markup: MarkupInfo,
   toScreen: (point: MarkupPoint) => { x: number; y: number },
   scale: number,
+  selected: boolean,
 ) {
   const color = rgbCss(markup.color)
   const strokeWidth = Math.max(1, markup.strokeWidth * scale)
-  const stroke = { stroke: color, strokeWidth, fill: 'none' as const }
+  const stroke = {
+    stroke: color,
+    strokeWidth,
+    fill: 'none' as const,
+  }
   const points = markup.points.map(toScreen)
   const hatchFill =
     markup.hatch === 'diagonal'
-      ? 'url(#markup-hatch-diagonal)'
+      ? `url(#markup-hatch-diagonal-${markup.id})`
       : markup.hatch === 'crosshatch'
-        ? 'url(#markup-hatch-cross)'
+        ? `url(#markup-hatch-cross-${markup.id})`
         : 'none'
+  const selectStroke = selected
+    ? { stroke: '#2563eb', strokeWidth: strokeWidth + 1, strokeDasharray: '4 3' }
+    : null
 
   switch (markup.tool) {
     case 'line':
@@ -82,13 +171,25 @@ function renderMarkup(
         return null
       }
       return (
-        <line
-          x1={points[0]!.x}
-          y1={points[0]!.y}
-          x2={points[points.length - 1]!.x}
-          y2={points[points.length - 1]!.y}
-          {...stroke}
-        />
+        <g>
+          <line
+            x1={points[0]!.x}
+            y1={points[0]!.y}
+            x2={points[points.length - 1]!.x}
+            y2={points[points.length - 1]!.y}
+            {...stroke}
+          />
+          {selectStroke ? (
+            <line
+              x1={points[0]!.x}
+              y1={points[0]!.y}
+              x2={points[points.length - 1]!.x}
+              y2={points[points.length - 1]!.y}
+              fill="none"
+              {...selectStroke}
+            />
+          ) : null}
+        </g>
       )
     case 'arrow':
       if (points.length < 2) {
@@ -108,8 +209,7 @@ function renderMarkup(
       )
     case 'rectangle':
     case 'textBox':
-    case 'callout':
-    case 'cloudCallout': {
+    case 'callout': {
       const box = screenBox(markup, toScreen)
       return (
         <g>
@@ -125,9 +225,68 @@ function renderMarkup(
             />
           ) : null}
           <rect x={box.x} y={box.y} width={box.width} height={box.height} {...stroke} />
-          {markup.tool === 'callout' || markup.tool === 'cloudCallout'
-            ? calloutLeader(markup, toScreen, stroke)
-            : null}
+          {markup.tool === 'callout' ? calloutLeader(markup, toScreen, stroke) : null}
+          {textContents(markup, box)}
+        </g>
+      )
+    }
+    case 'cloudCallout': {
+      if (markup.points.length < 4) {
+        return null
+      }
+      const cloudA = toScreen(markup.points[0]!)
+      const cloudB = toScreen(markup.points[1]!)
+      const textA = toScreen(markup.points[2]!)
+      const textB = toScreen(markup.points[3]!)
+      const cloudBox = {
+        x: Math.min(cloudA.x, cloudB.x),
+        y: Math.min(cloudA.y, cloudB.y),
+        width: Math.abs(cloudB.x - cloudA.x),
+        height: Math.abs(cloudB.y - cloudA.y),
+      }
+      const textBox = {
+        x: Math.min(textA.x, textB.x),
+        y: Math.min(textA.y, textB.y),
+        width: Math.abs(textB.x - textA.x),
+        height: Math.abs(textB.y - textA.y),
+      }
+      const cloudPts = cloudPolylineFromPolygon(
+        [
+          { x: cloudBox.x, y: cloudBox.y + cloudBox.height },
+          { x: cloudBox.x + cloudBox.width, y: cloudBox.y + cloudBox.height },
+          { x: cloudBox.x + cloudBox.width, y: cloudBox.y },
+          { x: cloudBox.x, y: cloudBox.y },
+        ],
+        DEFAULT_CLOUD_ARC_RADIUS * scale,
+      )
+      const cloudStart = boxCentre(markup.points[0]!, markup.points[1]!)
+      const textStart = boxCentre(markup.points[2]!, markup.points[3]!)
+      // Leader runs from the cloud edge to the text box edge facing the cloud.
+      const leaderStart = toScreen(boxSideAnchor(markup.points[0]!, markup.points[1]!, textStart))
+      const leaderEnd = toScreen(boxSideAnchor(markup.points[2]!, markup.points[3]!, cloudStart))
+      return (
+        <g>
+          {hatchFill !== 'none' ? (
+            <polygon
+              points={cloudPts.map((p) => `${p.x},${p.y}`).join(' ')}
+              fill={hatchFill}
+              stroke="none"
+              opacity={0.85}
+            />
+          ) : null}
+          <polygon
+            points={cloudPts.map((p) => `${p.x},${p.y}`).join(' ')}
+            {...stroke}
+          />
+          <line x1={leaderStart.x} y1={leaderStart.y} x2={leaderEnd.x} y2={leaderEnd.y} {...stroke} />
+          <rect
+            x={textBox.x}
+            y={textBox.y}
+            width={textBox.width}
+            height={textBox.height}
+            {...stroke}
+          />
+          {textContents(markup, textBox)}
         </g>
       )
     }
@@ -157,7 +316,6 @@ function renderMarkup(
       )
     }
     case 'polyline':
-    case 'arc':
     case 'pen':
       return (
         <polyline
@@ -165,6 +323,18 @@ function renderMarkup(
           {...stroke}
         />
       )
+    case 'arc': {
+      const sampled =
+        markup.points.length === 3
+          ? sampleArc(markup.points).map(toScreen)
+          : points
+      return (
+        <polyline
+          points={sampled.map((point) => `${point.x},${point.y}`).join(' ')}
+          {...stroke}
+        />
+      )
+    }
     case 'highlighter':
       return (
         <polyline
@@ -178,7 +348,6 @@ function renderMarkup(
         />
       )
     case 'polygon':
-    case 'cloud':
       return (
         <g>
           {hatchFill !== 'none' ? (
@@ -192,13 +361,51 @@ function renderMarkup(
           <polygon
             points={points.map((point) => `${point.x},${point.y}`).join(' ')}
             {...stroke}
-            strokeDasharray={markup.tool === 'cloud' ? '5 3' : undefined}
           />
         </g>
       )
+    case 'cloud': {
+      const cloudPts = cloudPolylineFromPolygon(
+        markup.points,
+        DEFAULT_CLOUD_ARC_RADIUS,
+      ).map(toScreen)
+      return (
+        <g>
+          {hatchFill !== 'none' ? (
+            <polygon
+              points={cloudPts.map((point) => `${point.x},${point.y}`).join(' ')}
+              fill={hatchFill}
+              stroke="none"
+              opacity={0.85}
+            />
+          ) : null}
+          <polygon
+            points={cloudPts.map((point) => `${point.x},${point.y}`).join(' ')}
+            {...stroke}
+          />
+        </g>
+      )
+    }
     default:
       return null
   }
+}
+
+function textContents(
+  markup: MarkupInfo,
+  box: { x: number; y: number; width: number; height: number },
+) {
+  const text = markup.contents?.trim()
+  if (!text) {
+    return null
+  }
+  return (
+    <foreignObject x={box.x + 4} y={box.y + 4} width={Math.max(8, box.width - 8)} height={Math.max(8, box.height - 8)}>
+      <div className="markup-overlay-text" style={{ color: rgbCss(markup.color) }}>
+        {text}
+      </div>
+    </foreignObject>
+  )
 }
 
 function calloutLeader(
@@ -209,16 +416,14 @@ function calloutLeader(
   if (markup.points.length < 3) {
     return null
   }
-  const box = screenBox(markup, toScreen)
-  const tip = toScreen(markup.points[markup.points.length - 1]!)
+  const tipPoint = markup.points[markup.points.length - 1]!
+  const tip = toScreen(tipPoint)
+  const anchor = toScreen(boxSideAnchor(markup.points[0]!, markup.points[1]!, tipPoint))
   return (
-    <line
-      x1={box.x + box.width / 2}
-      y1={box.y + box.height}
-      x2={tip.x}
-      y2={tip.y}
-      {...stroke}
-    />
+    <g>
+      <line x1={anchor.x} y1={anchor.y} x2={tip.x} y2={tip.y} {...stroke} />
+      {arrowHead(anchor, tip, stroke.stroke)}
+    </g>
   )
 }
 

@@ -10,10 +10,24 @@ MarkStratum targets document and drawing workflows: multi-page viewing, pan/zoom
 
 Beyond the original viewer MVP, the app now includes a multi-document shell, fillable forms, OCG layer controls, and markup tools:
 
+- Open PDFs (dialog, OS open-with, drag onto the window); multi-document tabs and optional split view
+- Page count, go-to page, fit-width / fit-page / zoom percent
+- Document mode: continuous vertical scroll
+- Drawing mode: pan/drag and wheel zoom toward the cursor (pan pauses while a markup tool is active)
+- Password prompt for encrypted PDFs
+- Thumbnails with page reorder, insert, delete, rotate, blank page, extract, split, replace, and crop
+- Bookmarks: outline tree with create, rename, delete, and reorder
+- Fillable AcroForm fields overlaid on pages; values persist on Save
+- Optional Content Groups (layers): list, toggle visibility, create, rename, and delete; assign markups to a layer on create or while editing
+- Markup tools: line, shapes, cloud (scalloped), callout, text, pen, highlighter; create, select, edit geometry and properties, delete; hatch scale and color for closed shapes
+- File → Flatten Markups: burns markups into page content in the working session (not permanent until Save / Save As)
+
+Not built yet: measure, stamps, signature fields, or OCR.
+
 - Open local PDFs (dialog, drag-and-drop, or OS open-with / default app)
 - Multi-tab workspace, recent files, editable bookmarks panel (add for current page, rename, drag to reorder or nest, delete), Pages panel, Markup panel, and horizontal split view
 - Pages preview shelf: resizable multi-column thumbnail grid, page tools (insert, extract, delete, split, rotate, replace, crop), drag to reorder, drop PDFs/tabs to insert or replace
-- Markup shelf: line, rectangle, arc, ellipse, arrow, polyline, polygon, cloud, cloud callout, callout, text box, pen, and highlighter (symbol tools); hatch fill for closed shapes; expandable Markups bar at the bottom lists author and page
+- Markup shelf: line, rectangle, arc, ellipse, arrow, polyline, polygon, cloud, cloud callout, callout, text box, pen, and highlighter; hatch fill with scale and color; select and edit geometry or properties; expandable Markups bar lists author and page
 - Document mode: continuous vertical scroll
 - Drawing mode: pan/drag and wheel zoom toward the cursor (pan pauses while a markup tool is active)
 - Visible-page rendering via PDFium (not PDF.js)
@@ -21,11 +35,12 @@ Beyond the original viewer MVP, the app now includes a multi-document shell, fil
 - Password-protected PDFs
 - Fillable AcroForm fields: text, checkbox, radio, dropdown, and list
 - Save and Save As write filled values while keeping the form editable
-- Optional Content Groups (layers): list, toggle visibility, create, rename, and delete; changes re-render via PDFium and persist on Save
+- Optional Content Groups (layers): list, toggle visibility, create, rename, and delete; assign markups to a layer; changes re-render via PDFium and persist on Save
 - PDF outline bookmarks: add for the current page, rename, delete, drag to reorder or nest; changes persist on Save
 - Markups persist as standard PDF annotations (author in `/T`); the viewer draws them instantly via an SVG overlay while PDF writes finish in the background
+- File → Flatten Markups burns markups into page content in the working session; Save / Save As makes it permanent
 
-Not built yet: measure, stamps, flatten, signature fields, OCR, or assigning markups to layers.
+Not built yet: measure, stamps, signature fields, or OCR.
 
 ## Requirements
 

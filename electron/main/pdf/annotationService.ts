@@ -17,7 +17,17 @@ import type {
   MarkupPoint,
   MarkupStyle,
   MarkupTool,
+  MarkupUpdateRequest,
 } from '../../../shared/ipc'
+import {
+  boxCentre,
+  boxSideAnchor,
+  cloudPolylineFromPolygon,
+  DEFAULT_CLOUD_ARC_RADIUS,
+  ensureClosed,
+  sampleArc,
+} from '../../../shared/markupGeometry'
+import { findOcgRef } from './ocgService'
 
 const ANNOTS = PDFName.of('Annots')
 const SUBTYPE = PDFName.of('Subtype')
@@ -37,10 +47,17 @@ const VERTICES = PDFName.of('Vertices')
 const INK_LIST = PDFName.of('InkList')
 const QUAD_POINTS = PDFName.of('QuadPoints')
 const CL = PDFName.of('CL')
+const RD = PDFName.of('RD')
 const IT = PDFName.of('IT')
 const DA = PDFName.of('DA')
+const OC = PDFName.of('OC')
 const TOOL_KEY = PDFName.of('MarkStratumTool')
 const HATCH_KEY = PDFName.of('MarkStratumHatch')
+const HATCH_SCALE_KEY = PDFName.of('MarkStratumHatchScale')
+const HATCH_COLOR_KEY = PDFName.of('MarkStratumHatchColor')
+const ARC_CONTROLS_KEY = PDFName.of('MarkStratumArcControls')
+const CLOUD_RECT_KEY = PDFName.of('MarkStratumCloudRect')
+const TEXT_RECT_KEY = PDFName.of('MarkStratumTextRect')
 
 const TOOL_LABELS: Record<MarkupTool, string> = {
   line: 'Line',
@@ -96,6 +113,7 @@ export async function createAnnotationInBytes(
     ...style,
     hatch,
   }, author, now)
+  applyLayer(pdf, annotDict, request.layerId)
   const annotRef = pdf.context.register(annotDict)
 
   const annots = ensureAnnots(page.node)
@@ -103,6 +121,64 @@ export async function createAnnotationInBytes(
 
   const saved = await pdf.save({ useObjectStreams: false })
   return { bytes: saved, markupId: refId(annotRef) }
+}
+
+export async function updateAnnotationInBytes(
+  bytes: Uint8Array,
+  request: MarkupUpdateRequest,
+): Promise<Uint8Array> {
+  const pdf = await loadPdf(bytes)
+  const target = Number(request.id)
+  if (!Number.isFinite(target) || target <= 0) {
+    throw new Error(`Markup not found: ${request.id}`)
+  }
+
+  const found = findAnnot(pdf, target)
+  if (!found) {
+    throw new Error(`Markup not found: ${request.id}`)
+  }
+
+  const existing = parseAnnot(found.dict, found.ref, found.pageIndex)
+  if (!existing) {
+    throw new Error(`Markup not found: ${request.id}`)
+  }
+
+  const points = request.points ?? existing.points
+  if (!points.length) {
+    throw new Error('Markup requires at least one point.')
+  }
+
+  const nextStyle = normalizeStyle({
+    color: request.style?.color ?? existing.color,
+    strokeWidth: request.style?.strokeWidth ?? existing.strokeWidth,
+    hatch: request.style?.hatch ?? existing.hatch,
+    hatchScale: request.style?.hatchScale ?? existing.hatchScale,
+    hatchColor: request.style?.hatchColor ?? existing.hatchColor,
+    opacity: request.style?.opacity,
+    contents: request.contents ?? request.style?.contents ?? existing.contents,
+  })
+  const hatch = CLOSED_HATCH_TOOLS.has(existing.tool) ? nextStyle.hatch : 'none'
+  const author = (request.author ?? existing.author).trim() || 'Unknown'
+  const createdAt = existing.createdAt ?? pdfDateNow()
+  const modDate = pdfDateNow()
+
+  const rebuilt = buildAnnotDict(
+    pdf,
+    existing.tool,
+    points,
+    { ...nextStyle, hatch },
+    author,
+    createdAt,
+  )
+  rebuilt.set(CREATION_DATE, PDFString.of(createdAt))
+  rebuilt.set(MOD_DATE, PDFString.of(modDate))
+
+  const layerId =
+    request.layerId === undefined ? existing.layerId : request.layerId || undefined
+  applyLayer(pdf, rebuilt, layerId)
+
+  pdf.context.assign(found.ref, rebuilt)
+  return pdf.save({ useObjectStreams: false })
 }
 
 export async function deleteAnnotationInBytes(
@@ -198,9 +274,12 @@ function parseAnnot(dict: PDFDict, ref: PDFRef, pageIndex: number): MarkupInfo |
   const contents = decodePdfText(dict.lookup(CONTENTS)) || undefined
   const createdAt = decodePdfText(dict.lookup(CREATION_DATE)) || undefined
   const hatch = readHatch(dict)
+  const hatchScale = readHatchScale(dict)
+  const hatchColor = readHatchColor(dict)
   const color = readColor(dict)
   const strokeWidth = readStrokeWidth(dict)
   const points = readPoints(dict, tool, bounds)
+  const layerId = readLayerId(dict)
   return {
     id: refId(ref),
     pageIndex,
@@ -210,9 +289,12 @@ function parseAnnot(dict: PDFDict, ref: PDFRef, pageIndex: number): MarkupInfo |
     contents,
     bounds,
     hatch,
+    hatchScale,
+    hatchColor,
     color,
     strokeWidth,
     points,
+    layerId,
   }
 }
 
@@ -290,7 +372,20 @@ function buildAnnotDict(
   author: string,
   date: string,
 ): PDFDict {
-  const bounds = boundsFromPoints(points, style.strokeWidth)
+  const geometry = cloudCalloutGeometry(tool, points)
+  const boundsRaw = boundsFromPoints(
+    geometry ? [...geometry.cloud, ...geometry.text] : points,
+    style.strokeWidth,
+  )
+  const bounds =
+    tool === 'cloud' || tool === 'cloudCallout'
+      ? {
+          left: boundsRaw.left - DEFAULT_CLOUD_ARC_RADIUS,
+          bottom: boundsRaw.bottom - DEFAULT_CLOUD_ARC_RADIUS,
+          right: boundsRaw.right + DEFAULT_CLOUD_ARC_RADIUS,
+          top: boundsRaw.top + DEFAULT_CLOUD_ARC_RADIUS,
+        }
+      : boundsRaw
   const colorArr = pdf.context.obj([...style.color])
   const fields: Record<string, PDFObject | string | number | boolean | PDFObject[]> = {
     Type: 'Annot',
@@ -304,7 +399,12 @@ function buildAnnotDict(
     F: 4,
     MarkStratumTool: PDFName.of(tool),
     MarkStratumHatch: PDFName.of(style.hatch),
+    MarkStratumHatchScale: style.hatchScale ?? 1,
     BS: pdf.context.obj({ W: style.strokeWidth, S: 'S' }),
+  }
+
+  if (style.hatchColor) {
+    fields.MarkStratumHatchColor = pdf.context.obj([...style.hatchColor])
   }
 
   if (style.contents) {
@@ -343,6 +443,9 @@ function buildAnnotDict(
     case 'arc':
       fields.Subtype = 'Ink'
       fields.InkList = inkListArray(pdf, [sampleArc(points)])
+      if (points.length >= 3) {
+        fields.MarkStratumArcControls = verticesArray(pdf, points.slice(0, 3))
+      }
       break
     case 'pen':
       fields.Subtype = 'Ink'
@@ -358,31 +461,62 @@ function buildAnnotDict(
       fields.Contents = PDFString.of(style.contents ?? '')
       fields.DA = PDFString.of(defaultAppearance(style.color))
       break
-    case 'callout':
+    case 'callout': {
       fields.Subtype = 'FreeText'
       fields.IT = PDFName.of('FreeTextCallout')
       fields.Contents = PDFString.of(style.contents ?? '')
       fields.DA = PDFString.of(defaultAppearance(style.color))
       fields.CL = calloutArray(pdf, points)
+      // Rect covers the leader too, so RD records where the text box sits inside it.
+      const textBox = calloutTextBox(points)
+      if (textBox) {
+        fields.RD = pdf.context.obj(rectDifferences(bounds, textBox))
+      }
       break
-    case 'cloudCallout':
+    }
+    case 'cloudCallout': {
       fields.Subtype = 'FreeText'
       fields.IT = PDFName.of('FreeTextCallout')
       fields.Contents = PDFString.of(style.contents ?? '')
       fields.DA = PDFString.of(defaultAppearance(style.color))
-      fields.CL = calloutArray(pdf, points)
-      fields.BE = pdf.context.obj({ S: 'C', I: 2 })
+      if (geometry) {
+        fields.MarkStratumCloudRect = verticesArray(pdf, geometry.cloud)
+        fields.MarkStratumTextRect = verticesArray(pdf, geometry.text)
+        // CL starts on the text box edge facing the cloud and ends on the cloud edge.
+        const cloudStart = boxCentre(geometry.cloud[0], geometry.cloud[1])
+        const textStart = boxCentre(geometry.text[0], geometry.text[1])
+        const textEdge = boxSideAnchor(geometry.text[0], geometry.text[1], cloudStart)
+        const attach = boxSideAnchor(geometry.cloud[0], geometry.cloud[1], textStart)
+        fields.CL = pdf.context.obj([textEdge.x, textEdge.y, attach.x, attach.y])
+      } else {
+        fields.CL = calloutArray(pdf, points)
+      }
       break
+    }
     default:
       fields.Subtype = 'Square'
   }
 
+  // Appearance uses the full visual bounds (cloud + text + leader).
   const apStream = buildAppearance(pdf, tool, points, style, bounds)
   if (apStream) {
     fields.AP = pdf.context.obj({ N: apStream })
   }
 
   return pdf.context.obj(fields) as PDFDict
+}
+
+function cloudCalloutGeometry(
+  tool: MarkupTool,
+  points: MarkupPoint[],
+): { cloud: [MarkupPoint, MarkupPoint]; text: [MarkupPoint, MarkupPoint] } | null {
+  if (tool !== 'cloudCallout' || points.length < 4) {
+    return null
+  }
+  return {
+    cloud: [points[0]!, points[1]!],
+    text: [points[2]!, points[3]!],
+  }
 }
 
 function buildAppearance(
@@ -398,11 +532,18 @@ function buildAppearance(
   if (!ops) {
     return null
   }
+  const fontDict = pdf.context.obj({
+    Type: 'Font',
+    Subtype: 'Type1',
+    BaseFont: 'Helvetica',
+  })
   const stream = pdf.context.flateStream(ops, {
     Type: 'XObject',
     Subtype: 'Form',
     BBox: [0, 0, width, height],
-    Resources: pdf.context.obj({}),
+    Resources: pdf.context.obj({
+      Font: pdf.context.obj({ Helv: fontDict }),
+    }),
   })
   return pdf.context.register(stream)
 }
@@ -451,21 +592,84 @@ function appearanceOperators(
       }
       return body
     }
+    case 'cloudCallout': {
+      const geometry = cloudCalloutGeometry(tool, points)
+      if (!geometry) {
+        return null
+      }
+      const cloudCorners = [
+        {
+          x: Math.min(geometry.cloud[0].x, geometry.cloud[1].x),
+          y: Math.min(geometry.cloud[0].y, geometry.cloud[1].y),
+        },
+        {
+          x: Math.max(geometry.cloud[0].x, geometry.cloud[1].x),
+          y: Math.min(geometry.cloud[0].y, geometry.cloud[1].y),
+        },
+        {
+          x: Math.max(geometry.cloud[0].x, geometry.cloud[1].x),
+          y: Math.max(geometry.cloud[0].y, geometry.cloud[1].y),
+        },
+        {
+          x: Math.min(geometry.cloud[0].x, geometry.cloud[1].x),
+          y: Math.max(geometry.cloud[0].y, geometry.cloud[1].y),
+        },
+      ]
+      const cloud = cloudPolylineFromPolygon(cloudCorners, DEFAULT_CLOUD_ARC_RADIUS)
+      const cloudPath = pathFrom(cloud, true)
+      let body = closedShapeAppearance(cloudPath, style, stroke, fill, true)
+      const textBounds = boundsFromPoints(geometry.text, 0)
+      const textPath = rectPath(textBounds, ox, oy)
+      body += `${stroke}\n${textPath} S\n`
+      const textCenter = boxCentre(geometry.text[0], geometry.text[1])
+      const attach = boxSideAnchor(geometry.cloud[0], geometry.cloud[1], textCenter)
+      const textEdge = boxSideAnchor(
+        { x: textBounds.left, y: textBounds.bottom },
+        { x: textBounds.right, y: textBounds.top },
+        boxCentre(geometry.cloud[0], geometry.cloud[1]),
+      )
+      const a = local(attach)
+      const t = local(textEdge)
+      body += `${stroke}\n${fmt(a.x)} ${fmt(a.y)} m ${fmt(t.x)} ${fmt(t.y)} l S\n`
+      body += freeTextOps(style, textBounds, ox, oy)
+      return body
+    }
     case 'rectangle':
     case 'textBox':
-    case 'callout':
-    case 'cloudCallout': {
-      const box = rectPath(bounds, ox, oy)
-      return closedShapeAppearance(box, style, stroke, fill, false)
+    case 'callout': {
+      // A callout's Rect spans the leader as well, so its box is drawn on its own bounds.
+      const boxBounds =
+        tool === 'callout' ? boundsFromPoints(points.slice(0, 2), style.strokeWidth) : bounds
+      const box = rectPath(boxBounds, ox, oy)
+      let body = closedShapeAppearance(box, style, stroke, fill, false)
+      if (tool === 'callout' && points.length >= 3) {
+        const tip = points[points.length - 1]!
+        const anchor = local(
+          boxSideAnchor(
+            { x: boxBounds.left, y: boxBounds.bottom },
+            { x: boxBounds.right, y: boxBounds.top },
+            tip,
+          ),
+        )
+        body += `${stroke}\n${fmt(anchor.x)} ${fmt(anchor.y)} m ${fmt(tip.x)} ${fmt(tip.y)} l S\n`
+      }
+      if (tool === 'textBox' || tool === 'callout') {
+        body += freeTextOps(style, boxBounds, ox, oy)
+      }
+      return body
     }
     case 'ellipse': {
       const path = ellipsePath(bounds, ox, oy)
       return closedShapeAppearance(path, style, stroke, fill, false)
     }
-    case 'polygon':
-    case 'cloud': {
+    case 'polygon': {
       const path = pathFrom(ensureClosed(points), true)
-      return closedShapeAppearance(path, style, stroke, fill, tool === 'cloud')
+      return closedShapeAppearance(path, style, stroke, fill, false)
+    }
+    case 'cloud': {
+      const cloud = cloudPolylineFromPolygon(points, DEFAULT_CLOUD_ARC_RADIUS)
+      const path = pathFrom(cloud, true)
+      return closedShapeAppearance(path, style, stroke, fill, true)
     }
     case 'polyline': {
       return `${stroke}\n${pathFrom(points, false)} S`
@@ -506,27 +710,20 @@ function closedShapeAppearance(
   if (hatch !== 'none') {
     out += 'q\n'
     out += `${path} W n\n`
-    out += hatchOps(style, path)
+    out += hatchOps(style)
     out += 'Q\n'
   }
   out += `${stroke}\n`
-  if (cloudy) {
-    // Border effect is on the annot; still stroke the polygon path.
-    out += `${path} S\n`
-  } else if (hatch === 'none') {
-    out += `${path} S\n`
-  } else {
-    out += `${path} S\n`
-  }
+  out += `${path} S\n`
   void fill
+  void cloudy
   return out
 }
 
-function hatchOps(style: MarkupStyle, _clipPath: string): string {
-  const [r, g, b] = style.color
-  const spacing = Math.max(6, style.strokeWidth * 4)
-  // Use a generous bounding box from typical page units relative to form BBox.
-  // Operators are clipped by W n above; draw a dense band of lines.
+function hatchOps(style: MarkupStyle): string {
+  const [r, g, b] = style.hatchColor ?? style.color
+  const scale = Math.max(0.25, style.hatchScale ?? 1)
+  const spacing = Math.max(3, style.strokeWidth * 4 * scale)
   let out = `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} RG 0.75 w\n`
   const extent = 2000
   if (style.hatch === 'diagonal' || style.hatch === 'crosshatch') {
@@ -540,6 +737,35 @@ function hatchOps(style: MarkupStyle, _clipPath: string): string {
     }
   }
   return out
+}
+
+function freeTextOps(
+  style: MarkupStyle,
+  bounds: FormFieldBounds,
+  ox: number,
+  oy: number,
+): string {
+  const text = (style.contents ?? '').trim()
+  if (!text) {
+    return ''
+  }
+  const [r, g, b] = style.color
+  const fontSize = 12
+  const x = bounds.left - ox + 4
+  const y = bounds.top - oy - fontSize - 2
+  const escaped = text
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .slice(0, 500)
+  return [
+    'BT',
+    `/Helv ${fontSize} Tf`,
+    `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg`,
+    `${fmt(x)} ${fmt(y)} Td`,
+    `(${escaped}) Tj`,
+    'ET',
+  ].join('\n') + '\n'
 }
 
 function rectPath(bounds: FormFieldBounds, ox: number, oy: number): string {
@@ -588,73 +814,6 @@ function arrowHeadOps(
     `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg`,
     `${fmt(to.x)} ${fmt(to.y)} m ${fmt(left.x)} ${fmt(left.y)} l ${fmt(right.x)} ${fmt(right.y)} l h f`,
   ].join('\n')
-}
-
-function sampleArc(points: MarkupPoint[]): MarkupPoint[] {
-  if (points.length < 2) {
-    return points
-  }
-  const start = points[0]!
-  const end = points[1]!
-  const mid = points[2] ?? {
-    x: (start.x + end.x) / 2,
-    y: (start.y + end.y) / 2 + Math.hypot(end.x - start.x, end.y - start.y) * 0.25,
-  }
-  const circle = circleFrom3Points(start, mid, end)
-  if (!circle) {
-    return [start, mid, end]
-  }
-  const a0 = Math.atan2(start.y - circle.cy, start.x - circle.cx)
-  const a1 = Math.atan2(mid.y - circle.cy, mid.x - circle.cx)
-  const a2 = Math.atan2(end.y - circle.cy, end.x - circle.cx)
-  const ccw = deltaAngle(a0, a1) > 0
-  let sweep = deltaAngle(a0, a2)
-  if (ccw && sweep < 0) {
-    sweep += Math.PI * 2
-  }
-  if (!ccw && sweep > 0) {
-    sweep -= Math.PI * 2
-  }
-  const steps = Math.max(12, Math.ceil(Math.abs(sweep) / (Math.PI / 24)))
-  const out: MarkupPoint[] = []
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps
-    const a = a0 + sweep * t
-    out.push({
-      x: circle.cx + Math.cos(a) * circle.r,
-      y: circle.cy + Math.sin(a) * circle.r,
-    })
-  }
-  return out
-}
-
-function circleFrom3Points(
-  a: MarkupPoint,
-  b: MarkupPoint,
-  c: MarkupPoint,
-): { cx: number; cy: number; r: number } | null {
-  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
-  if (Math.abs(d) < 1e-6) {
-    return null
-  }
-  const a2 = a.x * a.x + a.y * a.y
-  const b2 = b.x * b.x + b.y * b.y
-  const c2 = c.x * c.x + c.y * c.y
-  const cx = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d
-  const cy = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d
-  const r = Math.hypot(a.x - cx, a.y - cy)
-  return { cx, cy, r }
-}
-
-function deltaAngle(from: number, to: number): number {
-  let d = to - from
-  while (d > Math.PI) {
-    d -= Math.PI * 2
-  }
-  while (d < -Math.PI) {
-    d += Math.PI * 2
-  }
-  return d
 }
 
 function strokeToQuads(points: MarkupPoint[], strokeWidth: number): MarkupPoint[][] {
@@ -724,6 +883,42 @@ function ensureAnnots(pageNode: PDFDict): PDFArray {
   return created
 }
 
+function findAnnot(
+  pdf: PDFDocument,
+  objectNumber: number,
+): { dict: PDFDict; ref: PDFRef; pageIndex: number } | null {
+  const pages = pdf.getPages()
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    const page = pages[pageIndex]!
+    const annots = page.node.lookupMaybe(ANNOTS, PDFArray)
+    if (!annots) {
+      continue
+    }
+    for (let i = 0; i < annots.size(); i += 1) {
+      const entry = annots.get(i)
+      if (entry instanceof PDFRef && entry.objectNumber === objectNumber) {
+        const dict = pdf.context.lookupMaybe(entry, PDFDict)
+        if (dict) {
+          return { dict, ref: entry, pageIndex }
+        }
+      }
+    }
+  }
+  return null
+}
+
+function applyLayer(pdf: PDFDocument, dict: PDFDict, layerId: string | undefined): void {
+  if (!layerId) {
+    dict.delete(OC)
+    return
+  }
+  const ref = findOcgRef(pdf, layerId)
+  if (!ref) {
+    throw new Error(`Layer not found: ${layerId}`)
+  }
+  dict.set(OC, ref)
+}
+
 function lineArray(pdf: PDFDocument, points: MarkupPoint[]): PDFArray {
   const a = points[0]!
   const b = points[points.length - 1]!
@@ -760,8 +955,58 @@ function quadPointsFromStroke(pdf: PDFDocument, points: MarkupPoint[], strokeWid
   return pdf.context.obj(flat) as PDFArray
 }
 
+/** Raw corners of a callout text box (points[0], points[1]); null when the callout is incomplete. */
+function calloutTextBox(points: MarkupPoint[]): FormFieldBounds | null {
+  const a = points[0]
+  const b = points[1]
+  if (!a || !b || points.length < 3) {
+    return null
+  }
+  return {
+    left: Math.min(a.x, b.x),
+    right: Math.max(a.x, b.x),
+    bottom: Math.min(a.y, b.y),
+    top: Math.max(a.y, b.y),
+  }
+}
+
+/** RD holds the difference between Rect and the text box, in the order left, top, right, bottom. */
+function rectDifferences(rect: FormFieldBounds, inner: FormFieldBounds): number[] {
+  return [
+    inner.left - rect.left,
+    rect.top - inner.top,
+    rect.right - inner.right,
+    inner.bottom - rect.bottom,
+  ]
+}
+
+function calloutTextBoxFromDict(
+  dict: PDFDict,
+  bounds: FormFieldBounds,
+): [MarkupPoint, MarkupPoint] {
+  const fallback: [MarkupPoint, MarkupPoint] = [
+    { x: bounds.left, y: bounds.bottom },
+    { x: bounds.right, y: bounds.top },
+  ]
+  const rd = dict.lookup(RD)
+  if (!(rd instanceof PDFArray) || rd.size() < 4) {
+    return fallback
+  }
+  const left = bounds.left + (asNumber(rd.get(0)) ?? 0)
+  const top = bounds.top - (asNumber(rd.get(1)) ?? 0)
+  const right = bounds.right - (asNumber(rd.get(2)) ?? 0)
+  const bottom = bounds.bottom + (asNumber(rd.get(3)) ?? 0)
+  if (!(right > left) || !(top > bottom)) {
+    return fallback
+  }
+  return [
+    { x: left, y: bottom },
+    { x: right, y: top },
+  ]
+}
+
 function calloutArray(pdf: PDFDocument, points: MarkupPoint[]): PDFArray {
-  // points: [boxA, boxB, ...leader ending at tip]. CL is start (near box), knee?, tip.
+  // points: [boxA, boxB, ...leader ending at tip]. CL starts on the box edge facing the tip.
   if (points.length < 3) {
     const box = boundsFromPoints(points.slice(0, 2), 1)
     const tip = points[points.length - 1] ?? { x: box.right + 20, y: box.top + 20 }
@@ -772,34 +1017,26 @@ function calloutArray(pdf: PDFDocument, points: MarkupPoint[]): PDFArray {
       tip.y,
     ]) as PDFArray
   }
-  const box = boundsFromPoints(points.slice(0, 2), 1)
-  const leader = points.slice(2)
-  const start = { x: (box.left + box.right) / 2, y: box.bottom }
+  const tip = points[points.length - 1]!
+  const start = boxSideAnchor(points[0]!, points[1]!, tip)
   const flat: number[] = [start.x, start.y]
-  for (const p of leader) {
+  for (const p of points.slice(2)) {
     flat.push(p.x, p.y)
   }
   return pdf.context.obj(flat) as PDFArray
 }
 
-function ensureClosed(points: MarkupPoint[]): MarkupPoint[] {
-  if (points.length < 2) {
-    return points
-  }
-  const first = points[0]!
-  const last = points[points.length - 1]!
-  if (Math.hypot(first.x - last.x, first.y - last.y) < 0.01) {
-    return points
-  }
-  return [...points, first]
-}
-
 function normalizeStyle(style: MarkupStyle): MarkupStyle {
   const color = style.color.map((c) => clamp01(c)) as [number, number, number]
+  const hatchColor = style.hatchColor
+    ? (style.hatchColor.map((c) => clamp01(c)) as [number, number, number])
+    : undefined
   return {
     color,
     strokeWidth: Math.max(0.5, style.strokeWidth || 1.5),
     hatch: style.hatch ?? 'none',
+    hatchScale: Math.max(0.25, style.hatchScale ?? 1),
+    hatchColor,
     opacity: style.opacity,
     contents: style.contents,
   }
@@ -866,6 +1103,34 @@ function readHatch(dict: PDFDict): HatchPattern {
   return 'none'
 }
 
+function readHatchScale(dict: PDFDict): number {
+  const value = asNumber(dict.lookup(HATCH_SCALE_KEY))
+  if (value === null || value <= 0) {
+    return 1
+  }
+  return value
+}
+
+function readHatchColor(dict: PDFDict): [number, number, number] | undefined {
+  const color = dict.lookup(HATCH_COLOR_KEY)
+  if (color instanceof PDFArray && color.size() >= 3) {
+    return [
+      asNumber(color.get(0)) ?? 1,
+      asNumber(color.get(1)) ?? 0,
+      asNumber(color.get(2)) ?? 0,
+    ]
+  }
+  return undefined
+}
+
+function readLayerId(dict: PDFDict): string | undefined {
+  const oc = dict.get(OC)
+  if (oc instanceof PDFRef) {
+    return refId(oc)
+  }
+  return undefined
+}
+
 function readPoints(dict: PDFDict, tool: MarkupTool, bounds: FormFieldBounds): MarkupPoint[] {
   if (tool === 'line' || tool === 'arrow') {
     const line = dict.lookup(L)
@@ -882,7 +1147,28 @@ function readPoints(dict: PDFDict, tool: MarkupTool, bounds: FormFieldBounds): M
       return pairsFromArray(vertices)
     }
   }
-  if (tool === 'pen' || tool === 'arc') {
+  if (tool === 'arc') {
+    const controls = dict.lookup(ARC_CONTROLS_KEY)
+    if (controls instanceof PDFArray && controls.size() >= 6) {
+      return pairsFromArray(controls).slice(0, 3)
+    }
+    const ink = dict.lookup(INK_LIST)
+    if (ink instanceof PDFArray && ink.size() > 0) {
+      const first = ink.lookup(0)
+      if (first instanceof PDFArray) {
+        const sampled = pairsFromArray(first)
+        if (sampled.length >= 3) {
+          return [
+            sampled[0]!,
+            sampled[Math.floor(sampled.length / 2)]!,
+            sampled[sampled.length - 1]!,
+          ]
+        }
+        return sampled
+      }
+    }
+  }
+  if (tool === 'pen') {
     const ink = dict.lookup(INK_LIST)
     if (ink instanceof PDFArray && ink.size() > 0) {
       const first = ink.lookup(0)
@@ -900,13 +1186,46 @@ function readPoints(dict: PDFDict, tool: MarkupTool, bounds: FormFieldBounds): M
       ]
     }
   }
-  if (tool === 'callout' || tool === 'cloudCallout') {
+  if (tool === 'callout') {
     const cl = dict.lookup(CL)
     const leader = cl instanceof PDFArray ? pairsFromArray(cl) : []
+    const tip = leader.length > 0 ? leader[leader.length - 1]! : null
+    return [...calloutTextBoxFromDict(dict, bounds), ...(tip ? [tip] : leader)]
+  }
+  if (tool === 'cloudCallout') {
+    const cloud = dict.lookup(CLOUD_RECT_KEY)
+    const text = dict.lookup(TEXT_RECT_KEY)
+    if (
+      cloud instanceof PDFArray &&
+      cloud.size() >= 4 &&
+      text instanceof PDFArray &&
+      text.size() >= 4
+    ) {
+      const cloudPts = pairsFromArray(cloud)
+      const textPts = pairsFromArray(text)
+      if (cloudPts.length >= 2 && textPts.length >= 2) {
+        return [cloudPts[0]!, cloudPts[1]!, textPts[0]!, textPts[1]!]
+      }
+    }
+    if (cloud instanceof PDFArray && cloud.size() >= 4) {
+      const cloudPts = pairsFromArray(cloud)
+      if (cloudPts.length >= 2) {
+        return [
+          cloudPts[0]!,
+          cloudPts[1]!,
+          { x: bounds.left, y: bounds.bottom },
+          { x: bounds.right, y: bounds.top },
+        ]
+      }
+    }
+    // Legacy 3-point cloud callouts.
+    const cl = dict.lookup(CL)
+    const leader = cl instanceof PDFArray ? pairsFromArray(cl) : []
+    const tip = leader.length > 0 ? leader[leader.length - 1]! : null
     return [
       { x: bounds.left, y: bounds.bottom },
       { x: bounds.right, y: bounds.top },
-      ...leader,
+      ...(tip ? [tip] : leader),
     ]
   }
   return [

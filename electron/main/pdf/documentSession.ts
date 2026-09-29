@@ -12,6 +12,7 @@ import type {
   MarkupCreateRequest,
   MarkupInfo,
   MarkupMutationResult,
+  MarkupUpdateRequest,
   OpenDocumentResult,
   PageMutationResult,
   PickPdfPathResult,
@@ -27,7 +28,9 @@ import {
   createAnnotationInBytes,
   deleteAnnotationInBytes,
   listAnnotationsFromBytes,
+  updateAnnotationInBytes,
 } from './annotationService'
+import { flattenAnnotationsInBytes } from './flattenService'
 import {
   createBookmarkInBytes,
   deleteBookmarkInBytes,
@@ -269,6 +272,38 @@ export class DocumentSession {
 
   async deleteMarkup(documentId: string, markupId: string): Promise<MarkupMutationResult> {
     return this.mutateMarkups(documentId, (bytes) => deleteAnnotationInBytes(bytes, markupId))
+  }
+
+  async updateMarkup(
+    documentId: string,
+    request: MarkupUpdateRequest,
+  ): Promise<MarkupMutationResult> {
+    return this.mutateMarkups(documentId, (bytes) => updateAnnotationInBytes(bytes, request))
+  }
+
+  async flattenMarkups(documentId: string): Promise<MarkupMutationResult> {
+    const entry = this.documents.get(documentId)
+    if (!entry) {
+      return { ok: false, error: 'No document open.' }
+    }
+
+    try {
+      const sourceBytes = await readFile(renderPath(entry))
+      const nextBytes = await flattenAnnotationsInBytes(sourceBytes)
+      await this.commitWorkingPdf(entry, nextBytes, { refreshPages: true })
+      entry.markupsRevision += 1
+      const markups = await listAnnotationsFromBytes(nextBytes)
+      return {
+        ok: true,
+        document: toDocumentInfo(entry),
+        markups,
+        markupsRevision: entry.markupsRevision,
+        pagesRevision: entry.pagesRevision,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: message }
+    }
   }
 
   async getFormFields(documentId: string): Promise<FormFieldInfo[]> {

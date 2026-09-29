@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { FitMode, MarkupTool, ViewMode } from '../shared/ipc'
+import type { FitMode, LayerInfo, MarkupInfo, MarkupTool, ViewMode } from '../shared/ipc'
 import { MarkupListPanel } from './components/MarkupListPanel'
 import { PasswordDialog } from './components/PasswordDialog'
 import { PdfViewport } from './components/PdfViewport'
@@ -14,6 +14,7 @@ import { useWorkspace, type TabState } from './hooks/useWorkspace'
 import {
   DEFAULT_MARKUP_STYLE,
   authorOrUnknown,
+  hexToRgb01,
   readAuthorName,
   type MarkupDrawStyle,
 } from './markup/markupState'
@@ -59,14 +60,90 @@ export default function App() {
   const [activeMarkupTool, setActiveMarkupTool] = useState<MarkupTool | null>(null)
   const [markupStyle, setMarkupStyle] = useState<MarkupDrawStyle>(DEFAULT_MARKUP_STYLE)
   const [markupAuthor, setMarkupAuthor] = useState(() => authorOrUnknown(readAuthorName()))
+  const [selectedMarkupId, setSelectedMarkupId] = useState<string | null>(null)
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(null)
+  const [layers, setLayers] = useState<LayerInfo[]>([])
   const startupOpenPathRef = useRef<string | null | undefined>(undefined)
 
-  const { markups, createMarkup, deleteMarkup } = useMarkups({
-    documentId: focusedTab?.document.documentId ?? null,
-    markupsRevision: focusedTab?.markupsRevision ?? 0,
-    onPersisted: applyMarkupsChanged,
-    onError: setError,
-  })
+  const { markups, createMarkup, updateMarkup, deleteMarkup, flattenMarkups, patchLocalPoints } =
+    useMarkups({
+      documentId: focusedTab?.document.documentId ?? null,
+      markupsRevision: focusedTab?.markupsRevision ?? 0,
+      onPersisted: applyMarkupsChanged,
+      onError: setError,
+    })
+
+  const selectedMarkup: MarkupInfo | null = useMemo(
+    () => markups.find((item) => item.id === selectedMarkupId) ?? null,
+    [markups, selectedMarkupId],
+  )
+
+  const hiddenLayerIds = useMemo(() => {
+    const hidden = new Set<string>()
+    const walk = (nodes: LayerInfo[]) => {
+      for (const node of nodes) {
+        if (!node.visible) {
+          hidden.add(node.id)
+        }
+        if (node.children?.length) {
+          walk(node.children)
+        }
+      }
+    }
+    walk(layers)
+    return hidden
+  }, [layers])
+
+  useEffect(() => {
+    const documentId = focusedTab?.document.documentId
+    if (!documentId || !window.markStratum) {
+      setLayers([])
+      return
+    }
+    let active = true
+    void window.markStratum.getLayers(documentId).then((next) => {
+      if (active) {
+        setLayers(next)
+      }
+    }).catch((error: unknown) => {
+      setError(error instanceof Error ? error.message : String(error))
+    })
+    return () => {
+      active = false
+    }
+  }, [focusedTab?.document.documentId, focusedTab?.layersRevision, setError])
+
+  useEffect(() => {
+    setSelectedMarkupId(null)
+    setActiveLayerId(null)
+  }, [focusedTab?.document.documentId])
+
+  useEffect(() => {
+    if (activeMarkupTool) {
+      setSelectedMarkupId(null)
+    }
+  }, [activeMarkupTool])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedMarkupId(null)
+        return
+      }
+      if (
+        (event.key === 'Delete' || event.key === 'Backspace') &&
+        selectedMarkupId &&
+        !(event.target instanceof HTMLInputElement) &&
+        !(event.target instanceof HTMLTextAreaElement)
+      ) {
+        event.preventDefault()
+        deleteMarkup(selectedMarkupId)
+        setSelectedMarkupId(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [deleteMarkup, selectedMarkupId])
 
   const currentPage = focusedTab?.document.pages[focusedTab.pageIndex]
 
@@ -136,6 +213,22 @@ export default function App() {
     const offSaveAs = window.markStratum.onMenuSaveAs(() => {
       void saveFocusedDocumentAs()
     })
+    const offFlatten = window.markStratum.onMenuFlatten(() => {
+      if (!focusedTab) {
+        return
+      }
+      const ok = window.confirm(
+        'Flatten burns markups into the page in this session. Save to keep the change, or close without saving to discard it.',
+      )
+      if (!ok) {
+        return
+      }
+      void flattenMarkups().then((didFlatten) => {
+        if (didFlatten) {
+          setSelectedMarkupId(null)
+        }
+      })
+    })
     const offMode = window.markStratum.onMenuSetViewMode((mode) => {
       if (!focusedTabId) {
         return
@@ -172,6 +265,7 @@ export default function App() {
       offClose()
       offSave()
       offSaveAs()
+      offFlatten()
       offMode()
       offZoom()
       offSplit()
@@ -182,6 +276,7 @@ export default function App() {
     applyFit,
     applyOpenResult,
     closeFocusedTab,
+    flattenMarkups,
     focusedTab,
     focusedTabId,
     openDialog,
@@ -278,8 +373,39 @@ export default function App() {
         markups={
           tab.document.documentId === focusedTab?.document.documentId ? markups : []
         }
+        selectedMarkupId={
+          tab.document.documentId === focusedTab?.document.documentId
+            ? selectedMarkupId
+            : null
+        }
+        hiddenLayerIds={
+          tab.document.documentId === focusedTab?.document.documentId
+            ? hiddenLayerIds
+            : undefined
+        }
+        onSelectMarkup={
+          tab.document.documentId === focusedTab?.document.documentId
+            ? setSelectedMarkupId
+            : undefined
+        }
         onCreateMarkup={
-          tab.document.documentId === focusedTab?.document.documentId ? createMarkup : undefined
+          tab.document.documentId === focusedTab?.document.documentId
+            ? (input) =>
+                createMarkup({
+                  ...input,
+                  layerId: activeLayerId ?? undefined,
+                })
+            : undefined
+        }
+        onPatchMarkupPoints={
+          tab.document.documentId === focusedTab?.document.documentId
+            ? patchLocalPoints
+            : undefined
+        }
+        onCommitMarkupPoints={
+          tab.document.documentId === focusedTab?.document.documentId
+            ? (markupId, points) => updateMarkup({ id: markupId, points }, { points })
+            : undefined
         }
       />
     )
@@ -324,13 +450,64 @@ export default function App() {
           onOpenFilePath={(filePath) => {
             void openPath(filePath)
           }}
-          onLayersChanged={applyLayersChanged}
+          onLayersChanged={(result) => {
+            applyLayersChanged(result)
+            setLayers(result.layers)
+          }}
           onBookmarksChanged={applyBookmarksChanged}
           activeMarkupTool={activeMarkupTool}
           markupStyle={markupStyle}
+          layers={layers}
+          activeLayerId={activeLayerId}
+          selectedMarkup={selectedMarkup}
           onActiveMarkupToolChange={setActiveMarkupTool}
           onMarkupStyleChange={setMarkupStyle}
           onMarkupAuthorChange={setMarkupAuthor}
+          onActiveLayerChange={setActiveLayerId}
+          onSelectedMarkupStyleChange={(patch) => {
+            if (!selectedMarkup) {
+              return
+            }
+            const stylePatch: Parameters<typeof updateMarkup>[0]['style'] = {}
+            const optimistic: Partial<MarkupInfo> = {}
+            if (patch.color) {
+              const color = hexToRgb01(patch.color)
+              stylePatch.color = color
+              optimistic.color = color
+            }
+            if (patch.strokeWidth !== undefined) {
+              stylePatch.strokeWidth = patch.strokeWidth
+              optimistic.strokeWidth = patch.strokeWidth
+            }
+            if (patch.hatch !== undefined) {
+              stylePatch.hatch = patch.hatch
+              optimistic.hatch = patch.hatch
+            }
+            if (patch.hatchScale !== undefined) {
+              stylePatch.hatchScale = patch.hatchScale
+              optimistic.hatchScale = patch.hatchScale
+            }
+            if (patch.hatchColor) {
+              const hatchColor = hexToRgb01(patch.hatchColor)
+              stylePatch.hatchColor = hatchColor
+              optimistic.hatchColor = hatchColor
+            }
+            if (patch.contents !== undefined) {
+              optimistic.contents = patch.contents
+            }
+            if (patch.layerId !== undefined) {
+              optimistic.layerId = patch.layerId || undefined
+            }
+            updateMarkup(
+              {
+                id: selectedMarkup.id,
+                style: stylePatch,
+                contents: patch.contents,
+                layerId: patch.layerId,
+              },
+              optimistic,
+            )
+          }}
           onError={setError}
         />
 
@@ -398,7 +575,14 @@ export default function App() {
       <MarkupListPanel
         documentId={focusedTab?.document.documentId ?? null}
         markups={markups}
-        onDeleteMarkup={deleteMarkup}
+        selectedMarkupId={selectedMarkupId}
+        onSelectMarkup={setSelectedMarkupId}
+        onDeleteMarkup={(markupId) => {
+          deleteMarkup(markupId)
+          if (selectedMarkupId === markupId) {
+            setSelectedMarkupId(null)
+          }
+        }}
         onGoToPage={(pageIndex) => {
           if (!focusedTabId || !focusedTab) {
             return

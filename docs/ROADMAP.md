@@ -43,10 +43,10 @@ flowchart TB
 ## Long-term feature phases
 
 1. **Multi-doc shell:** tabs, thumbnails, drag-drop open across documents
-2. **Markups:** highlight, pen, shapes, text; write standard PDF annotations for compatibility *(create/list/delete shipped; edit geometry and layer assignment still open)*
+2. **Markups:** highlight, pen, shapes, text; write standard PDF annotations for compatibility *(create / list / update / delete, geometry edit, layer assignment shipped)*
 3. **Measure and stamp:** calibrated scale, length/area, stamp library
 4. **Page ops:** reorder, extract, insert, combine, drag pages between docs
-5. **Flatten / forms / layers:** annotation flatten, AcroForm fill, OCG layer visibility (list / toggle / create / rename / delete; assign new markups to layers later)
+5. **Flatten / forms / layers:** annotation flatten (File → Flatten Markups, session-dirty until Save), AcroForm fill, OCG layer visibility and markup↔layer assign
 6. **OCR / rewrite:** Tesseract (Apache-2.0) for text layer; content object edit later
 
 ## Viewer MVP (completed)
@@ -69,9 +69,9 @@ flowchart TB
 
 - Measure, stamps, edit/combine, flatten, OCR, cloud/sync
 
-OCG layer list/toggle/create/rename/delete is implemented in the app shell (mutate `OCProperties`, reload into PDFium). Assigning new markups to an active layer is still open.
+OCG layer list/toggle/create/rename/delete is implemented in the app shell (mutate `OCProperties`, reload into PDFium). New and existing markups can be assigned to an OCG via `/OC`.
 
-Markup tools (line, shapes, cloud/callout, text, pen, highlighter) write standard PDF annotations via pdf-lib, list authors from `/T`, and re-render through PDFium. Hatch fills bake into appearance streams for closed shapes.
+Markup tools (line, shapes, cloud/callout, text, pen, highlighter) write standard PDF annotations via pdf-lib, list authors from `/T`, support update/delete and geometry edit, and re-render through an SVG overlay. Hatch fills bake into appearance streams for closed shapes. File → Flatten Markups burns appearances into page content in the working PDF (dirty until Save).
 
 ### Known MVP follow-ups (before or alongside phase 1)
 

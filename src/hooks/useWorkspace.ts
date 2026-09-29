@@ -312,6 +312,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     (result: {
       document: DocumentInfo
       markupsRevision: number
+      pagesRevision?: number
     }) => {
       setTabs((prev) =>
         prev.map((tab) =>
@@ -320,6 +321,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
                 ...tab,
                 document: result.document,
                 markupsRevision: result.markupsRevision,
+                pagesRevision: result.pagesRevision ?? tab.pagesRevision,
               }
             : tab,
         ),

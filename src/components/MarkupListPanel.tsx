@@ -6,6 +6,8 @@ import { MarkupToolIcon } from './MarkupToolIcon'
 type MarkupListPanelProps = {
   documentId: string | null
   markups: MarkupInfo[]
+  selectedMarkupId?: string | null
+  onSelectMarkup?: (markupId: string | null) => void
   onDeleteMarkup: (markupId: string) => void
   onGoToPage: (pageIndex: number) => void
 }
@@ -13,6 +15,8 @@ type MarkupListPanelProps = {
 export function MarkupListPanel({
   documentId,
   markups,
+  selectedMarkupId = null,
+  onSelectMarkup,
   onDeleteMarkup,
   onGoToPage,
 }: MarkupListPanelProps) {
@@ -48,11 +52,17 @@ export function MarkupListPanel({
           ) : (
             <ul className="markup-list">
               {markups.map((markup) => (
-                <li key={markup.id} className="markup-list-item">
+                <li
+                  key={markup.id}
+                  className={`markup-list-item${selectedMarkupId === markup.id ? ' selected' : ''}`}
+                >
                   <button
                     type="button"
                     className="markup-list-main"
-                    onClick={() => onGoToPage(markup.pageIndex)}
+                    onClick={() => {
+                      onSelectMarkup?.(markup.id)
+                      onGoToPage(markup.pageIndex)
+                    }}
                     title={`Go to page ${markup.pageIndex + 1}`}
                   >
                     <span className="markup-list-icon" aria-hidden="true">

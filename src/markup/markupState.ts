@@ -32,12 +32,25 @@ export type MarkupDrawStyle = {
   color: string
   strokeWidth: number
   hatch: HatchPattern
+  hatchScale: number
+  hatchColor: string
 }
 
 export const DEFAULT_MARKUP_STYLE: MarkupDrawStyle = {
   color: '#e85d4c',
   strokeWidth: 2,
   hatch: 'none',
+  hatchScale: 1,
+  hatchColor: '#e85d4c',
+}
+
+export function rgb01ToHex(color: [number, number, number]): string {
+  const [r, g, b] = color
+  const toByte = (n: number) =>
+    Math.round(Math.min(1, Math.max(0, n)) * 255)
+      .toString(16)
+      .padStart(2, '0')
+  return `#${toByte(r)}${toByte(g)}${toByte(b)}`
 }
 
 export function readAuthorName(): string {

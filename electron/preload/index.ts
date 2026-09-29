@@ -10,6 +10,7 @@ import {
   type MarkupCreateRequest,
   type MarkupInfo,
   type MarkupMutationResult,
+  type MarkupUpdateRequest,
   type MenuZoomCommand,
   type OpenDocumentResult,
   type PageCropRect,
@@ -56,7 +57,12 @@ export type MarkStratumApi = {
     documentId: string,
     request: MarkupCreateRequest,
   ) => Promise<MarkupMutationResult>
+  updateMarkup: (
+    documentId: string,
+    request: MarkupUpdateRequest,
+  ) => Promise<MarkupMutationResult>
   deleteMarkup: (documentId: string, markupId: string) => Promise<MarkupMutationResult>
+  flattenMarkups: (documentId: string) => Promise<MarkupMutationResult>
   getFormFields: (documentId: string) => Promise<FormFieldInfo[]>
   setFormValues: (
     documentId: string,
@@ -138,6 +144,7 @@ export type MarkStratumApi = {
   onMenuClose: (handler: () => void) => () => void
   onMenuSave: (handler: () => void) => () => void
   onMenuSaveAs: (handler: () => void) => () => void
+  onMenuFlatten: (handler: () => void) => () => void
   onMenuSetViewMode: (handler: (mode: ViewMode) => void) => () => void
   onMenuZoom: (handler: (command: MenuZoomCommand) => void) => () => void
   onMenuToggleSplit: (handler: () => void) => () => void
@@ -176,8 +183,12 @@ const api: MarkStratumApi = {
   getMarkups: (documentId) => ipcRenderer.invoke(IpcChannels.getMarkups, documentId),
   createMarkup: (documentId, request) =>
     ipcRenderer.invoke(IpcChannels.createMarkup, documentId, request),
+  updateMarkup: (documentId, request) =>
+    ipcRenderer.invoke(IpcChannels.updateMarkup, documentId, request),
   deleteMarkup: (documentId, markupId) =>
     ipcRenderer.invoke(IpcChannels.deleteMarkup, documentId, markupId),
+  flattenMarkups: (documentId) =>
+    ipcRenderer.invoke(IpcChannels.flattenMarkups, documentId),
   getFormFields: (documentId) => ipcRenderer.invoke(IpcChannels.getFormFields, documentId),
   setFormValues: (documentId, updates) =>
     ipcRenderer.invoke(IpcChannels.setFormValues, documentId, updates),
@@ -238,6 +249,7 @@ const api: MarkStratumApi = {
   onMenuClose: (handler) => subscribe(IpcChannels.menuClose, handler),
   onMenuSave: (handler) => subscribe(IpcChannels.menuSave, handler),
   onMenuSaveAs: (handler) => subscribe(IpcChannels.menuSaveAs, handler),
+  onMenuFlatten: (handler) => subscribe(IpcChannels.menuFlatten, handler),
   onMenuSetViewMode: (handler) =>
     subscribe<[ViewMode]>(IpcChannels.menuSetViewMode, handler),
   onMenuZoom: (handler) => subscribe<[MenuZoomCommand]>(IpcChannels.menuZoom, handler),

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
-import type { BookmarkNode, DocumentInfo, LayerInfo, MarkupTool, PageInfo } from '../../shared/ipc'
+import type { BookmarkNode, DocumentInfo, HatchPattern, LayerInfo, MarkupInfo, MarkupTool, PageInfo } from '../../shared/ipc'
 import type { RecentFileEntry } from '../hooks/useRecentFiles'
 import type { MarkupDrawStyle } from '../markup/markupState'
 import { BookmarksPanel } from './panels/BookmarksPanel'
@@ -99,9 +99,22 @@ type ToolShelfProps = {
   }) => void
   activeMarkupTool: MarkupTool | null
   markupStyle: MarkupDrawStyle
+  layers: LayerInfo[]
+  activeLayerId: string | null
+  selectedMarkup: MarkupInfo | null
   onActiveMarkupToolChange: (tool: MarkupTool | null) => void
   onMarkupStyleChange: (style: MarkupDrawStyle) => void
   onMarkupAuthorChange: (author: string) => void
+  onActiveLayerChange: (layerId: string | null) => void
+  onSelectedMarkupStyleChange: (patch: {
+    color?: string
+    strokeWidth?: number
+    hatch?: HatchPattern
+    hatchScale?: number
+    hatchColor?: string
+    contents?: string
+    layerId?: string | null
+  }) => void
   onError: (message: string) => void
 }
 
@@ -249,9 +262,14 @@ export function ToolShelf({
   onBookmarksChanged,
   activeMarkupTool,
   markupStyle,
+  layers,
+  activeLayerId,
+  selectedMarkup,
   onActiveMarkupToolChange,
   onMarkupStyleChange,
   onMarkupAuthorChange,
+  onActiveLayerChange,
+  onSelectedMarkupStyleChange,
   onError,
 }: ToolShelfProps) {
   const [activeToolId, setActiveToolId] = useState<ToolId | null>(null)
@@ -369,19 +387,27 @@ export function ToolShelf({
             documentId={documentId}
             activeTool={activeMarkupTool}
             style={markupStyle}
+            layers={layers}
+            activeLayerId={activeLayerId}
+            selectedMarkup={selectedMarkup}
             onActiveToolChange={onActiveMarkupToolChange}
             onStyleChange={onMarkupStyleChange}
             onAuthorChange={onMarkupAuthorChange}
+            onActiveLayerChange={onActiveLayerChange}
+            onSelectedStyleChange={onSelectedMarkupStyleChange}
           />
         ),
       },
     }),
     [
+      activeLayerId,
       activeMarkupTool,
       bookmarksRevision,
       documentId,
+      layers,
       layersRevision,
       markupStyle,
+      onActiveLayerChange,
       onActiveMarkupToolChange,
       onBookmarksChanged,
       onClearRecent,
@@ -393,11 +419,13 @@ export function ToolShelf({
       onOpenFilePath,
       onOpenRecent,
       onPagesChanged,
+      onSelectedMarkupStyleChange,
       pageIndex,
       pages,
       pagesRevision,
       recentEntries,
       renderPageToUrl,
+      selectedMarkup,
     ],
   )
 

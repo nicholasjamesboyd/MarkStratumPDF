@@ -421,7 +421,7 @@ function appendToOrder(config: PDFDict, ref: PDFRef): void {
   }
 }
 
-function findOcgRef(pdf: PDFDocument, layerId: string): PDFRef | null {
+export function findOcgRef(pdf: PDFDocument, layerId: string): PDFRef | null {
   if (layerId.startsWith('group:')) {
     return null
   }

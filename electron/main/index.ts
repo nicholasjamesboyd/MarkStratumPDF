@@ -7,6 +7,7 @@ import {
   IpcChannels,
   type FormValueUpdate,
   type MarkupCreateRequest,
+  type MarkupUpdateRequest,
   type OpenDocumentResult,
   type RenderPageRequest,
   type SaveDocumentResult,
@@ -245,11 +246,22 @@ function registerIpc() {
   )
 
   ipcMain.handle(
+    IpcChannels.updateMarkup,
+    async (_event, documentId: string, request: MarkupUpdateRequest) => {
+      return session.updateMarkup(documentId, request)
+    },
+  )
+
+  ipcMain.handle(
     IpcChannels.deleteMarkup,
     async (_event, documentId: string, markupId: string) => {
       return session.deleteMarkup(documentId, markupId)
     },
   )
+
+  ipcMain.handle(IpcChannels.flattenMarkups, async (_event, documentId: string) => {
+    return session.flattenMarkups(documentId)
+  })
 
   ipcMain.handle(IpcChannels.getFormFields, async (_event, documentId: string) => {
     return session.getFormFields(documentId)

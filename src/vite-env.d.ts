@@ -11,6 +11,7 @@ import type {
   MarkupCreateRequest,
   MarkupInfo,
   MarkupMutationResult,
+  MarkupUpdateRequest,
   MenuZoomCommand,
   OpenDocumentResult,
   PageCropRect,
@@ -56,7 +57,12 @@ type MarkStratumApi = {
     documentId: string,
     request: MarkupCreateRequest,
   ) => Promise<MarkupMutationResult>
+  updateMarkup: (
+    documentId: string,
+    request: MarkupUpdateRequest,
+  ) => Promise<MarkupMutationResult>
   deleteMarkup: (documentId: string, markupId: string) => Promise<MarkupMutationResult>
+  flattenMarkups: (documentId: string) => Promise<MarkupMutationResult>
   getFormFields: (documentId: string) => Promise<FormFieldInfo[]>
   setFormValues: (
     documentId: string,
@@ -138,6 +144,7 @@ type MarkStratumApi = {
   onMenuClose: (handler: () => void) => () => void
   onMenuSave: (handler: () => void) => () => void
   onMenuSaveAs: (handler: () => void) => () => void
+  onMenuFlatten: (handler: () => void) => () => void
   onMenuSetViewMode: (handler: (mode: ViewMode) => void) => () => void
   onMenuZoom: (handler: (command: MenuZoomCommand) => void) => () => void
   onMenuToggleSplit: (handler: () => void) => () => void

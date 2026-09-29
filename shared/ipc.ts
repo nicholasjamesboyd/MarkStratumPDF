@@ -142,6 +142,10 @@ export type MarkupStyle = {
   color: [number, number, number]
   strokeWidth: number
   hatch: HatchPattern
+  /** Multiplier for hatch line spacing (1 = default). */
+  hatchScale?: number
+  /** Hatch line color; defaults to stroke color. */
+  hatchColor?: [number, number, number]
   opacity?: number
   contents?: string
 }
@@ -153,6 +157,18 @@ export type MarkupCreateRequest = {
   style: MarkupStyle
   /** Page-space points (PDF Y-up). Meaning depends on tool. */
   points: MarkupPoint[]
+  /** Optional OCG layer id for `/OC`. */
+  layerId?: string
+}
+
+export type MarkupUpdateRequest = {
+  id: string
+  points?: MarkupPoint[]
+  style?: Partial<MarkupStyle>
+  contents?: string
+  /** Set to assign; empty string or null clears `/OC`. */
+  layerId?: string | null
+  author?: string
 }
 
 export type MarkupInfo = {
@@ -164,13 +180,23 @@ export type MarkupInfo = {
   contents?: string
   bounds: FormFieldBounds
   hatch: HatchPattern
+  hatchScale: number
+  hatchColor?: [number, number, number]
   color: [number, number, number]
   strokeWidth: number
   points: MarkupPoint[]
+  layerId?: string
 }
 
 export type MarkupMutationResult =
-  | { ok: true; document: DocumentInfo; markups: MarkupInfo[]; markupsRevision: number }
+  | {
+      ok: true
+      document: DocumentInfo
+      markups: MarkupInfo[]
+      markupsRevision: number
+      /** Present when page bitmaps must refresh (e.g. after flatten). */
+      pagesRevision?: number
+    }
   | { ok: false; error: string }
 
 export type PageCropRect = {
@@ -230,7 +256,9 @@ export const IpcChannels = {
   moveBookmark: 'pdf:moveBookmark',
   getMarkups: 'pdf:getMarkups',
   createMarkup: 'pdf:createMarkup',
+  updateMarkup: 'pdf:updateMarkup',
   deleteMarkup: 'pdf:deleteMarkup',
+  flattenMarkups: 'pdf:flattenMarkups',
   getFormFields: 'pdf:getFormFields',
   setFormValues: 'pdf:setFormValues',
   getLayers: 'pdf:getLayers',
@@ -257,6 +285,7 @@ export const IpcChannels = {
   menuClose: 'menu:close',
   menuSave: 'menu:save',
   menuSaveAs: 'menu:saveAs',
+  menuFlatten: 'menu:flatten',
   menuSetViewMode: 'menu:setViewMode',
   menuZoom: 'menu:zoom',
   menuToggleSplit: 'menu:toggleSplit',

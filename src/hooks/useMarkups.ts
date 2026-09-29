@@ -5,6 +5,7 @@ import type {
   MarkupInfo,
   MarkupPoint,
   MarkupTool,
+  MarkupUpdateRequest,
 } from '../../shared/ipc'
 import { authorOrUnknown, hexToRgb01, type MarkupDrawStyle } from '../markup/markupState'
 
@@ -12,6 +13,7 @@ type PersistResult = {
   document: DocumentInfo
   markups: MarkupInfo[]
   markupsRevision: number
+  pagesRevision?: number
 }
 
 type UseMarkupsOptions = {
@@ -112,6 +114,7 @@ export function useMarkups({
       style: MarkupDrawStyle
       points: MarkupPoint[]
       contents?: string
+      layerId?: string
     }) => {
       const id = documentIdRef.current
       if (!id) {
@@ -119,6 +122,7 @@ export function useMarkups({
       }
 
       const color = hexToRgb01(input.style.color)
+      const hatchColor = hexToRgb01(input.style.hatchColor || input.style.color)
       const strokeWidth = input.style.strokeWidth
       const tempId = nextTempId()
       const optimistic: MarkupInfo = {
@@ -129,9 +133,12 @@ export function useMarkups({
         contents: input.contents,
         bounds: boundsFromPoints(input.points, strokeWidth),
         hatch: input.style.hatch,
+        hatchScale: input.style.hatchScale,
+        hatchColor,
         color,
         strokeWidth,
         points: input.points,
+        layerId: input.layerId,
       }
 
       setMarkups((prev) => [...prev, optimistic])
@@ -141,10 +148,13 @@ export function useMarkups({
         tool: input.tool,
         author: authorOrUnknown(input.author),
         points: input.points,
+        layerId: input.layerId,
         style: {
           color,
           strokeWidth,
           hatch: input.style.hatch,
+          hatchScale: input.style.hatchScale,
+          hatchColor,
           opacity: input.tool === 'highlighter' ? 0.4 : 1,
           contents: input.contents,
         },
@@ -171,6 +181,7 @@ export function useMarkups({
             document: result.document,
             markups: result.markups,
             markupsRevision: result.markupsRevision,
+            pagesRevision: result.pagesRevision,
           })
         } catch (error) {
           setMarkups((prev) => prev.filter((item) => item.id !== tempId))
@@ -179,6 +190,63 @@ export function useMarkups({
       })
     },
     [enqueue],
+  )
+
+  const updateMarkup = useCallback(
+    (request: MarkupUpdateRequest, optimisticPatch?: Partial<MarkupInfo>) => {
+      const id = documentIdRef.current
+      if (!id || request.id.startsWith('temp-')) {
+        return
+      }
+
+      if (optimisticPatch) {
+        setMarkups((prev) =>
+          prev.map((item) =>
+            item.id === request.id
+              ? {
+                  ...item,
+                  ...optimisticPatch,
+                  bounds:
+                    optimisticPatch.points
+                      ? boundsFromPoints(
+                          optimisticPatch.points,
+                          optimisticPatch.strokeWidth ?? item.strokeWidth,
+                        )
+                      : item.bounds,
+                }
+              : item,
+          ),
+        )
+      }
+
+      enqueue(async () => {
+        if (documentIdRef.current !== id) {
+          return
+        }
+        try {
+          const result = await window.markStratum.updateMarkup(id, request)
+          if (!result.ok) {
+            void loadMarkups(id)
+            onErrorRef.current(result.error)
+            return
+          }
+          setMarkups((prev) => {
+            const temps = prev.filter((item) => item.id.startsWith('temp-'))
+            return [...result.markups, ...temps]
+          })
+          onPersistedRef.current({
+            document: result.document,
+            markups: result.markups,
+            markupsRevision: result.markupsRevision,
+            pagesRevision: result.pagesRevision,
+          })
+        } catch (error) {
+          void loadMarkups(id)
+          onErrorRef.current(error instanceof Error ? error.message : String(error))
+        }
+      })
+    },
+    [enqueue, loadMarkups],
   )
 
   const deleteMarkup = useCallback(
@@ -221,6 +289,7 @@ export function useMarkups({
             document: result.document,
             markups: result.markups,
             markupsRevision: result.markupsRevision,
+            pagesRevision: result.pagesRevision,
           })
         } catch (error) {
           setMarkups((prev) => {
@@ -236,9 +305,51 @@ export function useMarkups({
     [enqueue],
   )
 
+  const flattenMarkups = useCallback(async () => {
+    const id = documentIdRef.current
+    if (!id) {
+      return false
+    }
+    try {
+      const result = await window.markStratum.flattenMarkups(id)
+      if (!result.ok) {
+        onErrorRef.current(result.error)
+        return false
+      }
+      setMarkups(result.markups)
+      onPersistedRef.current({
+        document: result.document,
+        markups: result.markups,
+        markupsRevision: result.markupsRevision,
+        pagesRevision: result.pagesRevision,
+      })
+      return true
+    } catch (error) {
+      onErrorRef.current(error instanceof Error ? error.message : String(error))
+      return false
+    }
+  }, [])
+
+  const patchLocalPoints = useCallback((markupId: string, points: MarkupPoint[]) => {
+    setMarkups((prev) =>
+      prev.map((item) =>
+        item.id === markupId
+          ? {
+              ...item,
+              points,
+              bounds: boundsFromPoints(points, item.strokeWidth),
+            }
+          : item,
+      ),
+    )
+  }, [])
+
   return {
     markups,
     createMarkup,
+    updateMarkup,
     deleteMarkup,
+    flattenMarkups,
+    patchLocalPoints,
   }
 }

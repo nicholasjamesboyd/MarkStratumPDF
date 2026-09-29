@@ -20,6 +20,7 @@ import {
 import type { MarkupDrawStyle } from '../markup/markupState'
 import { FormFieldOverlays } from './FormFieldOverlays'
 import { MarkupDrawingLayer } from './MarkupDrawingLayer'
+import { MarkupEditLayer } from './MarkupEditLayer'
 import { MarkupOverlay } from './MarkupOverlay'
 
 const PAGE_GAP = 12
@@ -53,6 +54,9 @@ type PdfViewportProps = {
   markupStyle?: MarkupDrawStyle
   markupAuthor?: string
   markups?: MarkupInfo[]
+  selectedMarkupId?: string | null
+  hiddenLayerIds?: ReadonlySet<string>
+  onSelectMarkup?: (markupId: string | null) => void
   onCreateMarkup?: (input: {
     pageIndex: number
     tool: MarkupTool
@@ -60,7 +64,10 @@ type PdfViewportProps = {
     style: MarkupDrawStyle
     points: MarkupPoint[]
     contents?: string
+    layerId?: string
   }) => void
+  onPatchMarkupPoints?: (markupId: string, points: MarkupPoint[]) => void
+  onCommitMarkupPoints?: (markupId: string, points: MarkupPoint[]) => void
 }
 
 type PageImage = {
@@ -91,7 +98,12 @@ export function PdfViewport({
   markupStyle,
   markupAuthor = 'Unknown',
   markups = [],
+  selectedMarkupId = null,
+  hiddenLayerIds,
+  onSelectMarkup,
   onCreateMarkup,
+  onPatchMarkupPoints,
+  onCommitMarkupPoints,
 }: PdfViewportProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const drawingRef = useRef<HTMLDivElement>(null)
@@ -427,7 +439,12 @@ export function PdfViewport({
                     markupStyle={markupStyle}
                     markupAuthor={markupAuthor}
                     markups={markups}
+                    selectedMarkupId={selectedMarkupId}
+                    hiddenLayerIds={hiddenLayerIds}
+                    onSelectMarkup={onSelectMarkup}
                     onCreateMarkup={onCreateMarkup}
+                    onPatchMarkupPoints={onPatchMarkupPoints}
+                    onCommitMarkupPoints={onCommitMarkupPoints}
                   />
                 )
               })}
@@ -467,7 +484,12 @@ export function PdfViewport({
                 markupStyle={markupStyle}
                 markupAuthor={markupAuthor}
                 markups={markups}
+                selectedMarkupId={selectedMarkupId}
+                hiddenLayerIds={hiddenLayerIds}
+                onSelectMarkup={onSelectMarkup}
                 onCreateMarkup={onCreateMarkup}
+                onPatchMarkupPoints={onPatchMarkupPoints}
+                onCommitMarkupPoints={onCommitMarkupPoints}
               />
             )
           })}
@@ -499,7 +521,12 @@ function PageSlot({
   markupStyle,
   markupAuthor = 'Unknown',
   markups = [],
+  selectedMarkupId = null,
+  hiddenLayerIds,
+  onSelectMarkup,
   onCreateMarkup,
+  onPatchMarkupPoints,
+  onCommitMarkupPoints,
 }: {
   width: number
   height: number
@@ -515,6 +542,9 @@ function PageSlot({
   markupStyle?: MarkupDrawStyle
   markupAuthor?: string
   markups?: MarkupInfo[]
+  selectedMarkupId?: string | null
+  hiddenLayerIds?: ReadonlySet<string>
+  onSelectMarkup?: (markupId: string | null) => void
   onCreateMarkup?: (input: {
     pageIndex: number
     tool: MarkupTool
@@ -522,8 +552,17 @@ function PageSlot({
     style: MarkupDrawStyle
     points: MarkupPoint[]
     contents?: string
+    layerId?: string
   }) => void
+  onPatchMarkupPoints?: (markupId: string, points: MarkupPoint[]) => void
+  onCommitMarkupPoints?: (markupId: string, points: MarkupPoint[]) => void
 }) {
+  const selected =
+    selectedMarkupId
+      ? markups.find((m) => m.id === selectedMarkupId && m.pageIndex === pageIndex)
+      : undefined
+  const editing = Boolean(selected && !activeMarkupTool)
+
   return (
     <div className="page-slot" style={{ width, height }}>
       {image ? (
@@ -545,7 +584,20 @@ function PageSlot({
         pageIndex={pageIndex}
         pageHeightPts={pageHeightPts}
         scale={scale}
+        selectedId={selectedMarkupId}
+        interactive={!activeMarkupTool}
+        hiddenLayerIds={hiddenLayerIds}
+        onSelect={onSelectMarkup}
       />
+      {editing && selected && onPatchMarkupPoints && onCommitMarkupPoints ? (
+        <MarkupEditLayer
+          markup={selected}
+          pageHeightPts={pageHeightPts}
+          scale={scale}
+          onChangePoints={(points) => onPatchMarkupPoints(selected.id, points)}
+          onCommit={(points) => onCommitMarkupPoints(selected.id, points)}
+        />
+      ) : null}
       {documentId && activeMarkupTool && markupStyle && onCreateMarkup ? (
         <MarkupDrawingLayer
           pageIndex={pageIndex}
